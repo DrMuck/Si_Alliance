@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Si_Alliance
 {
     /// <summary>
-    /// !ally (players, commander-gated inside) and !allyadmin (Power.Cheat). One command name each, no aliases.
+    /// !ally (players, commander-gated inside) and !allyadmin (Power.Teams: the game's own admin list grants it, Cheat it does not). One command name each, no aliases.
     /// </summary>
     internal static class Commands
     {
@@ -170,12 +170,16 @@ namespace Si_Alliance
             {
                 case "force":
                 {
-                    if (tokens.Length < 4) { Reply(caller, "usage: !allyadmin force <teamA> <teamB>"); return; }
+                    // "!allyadmin force sol cent" or "!allyadmin force Sol+Centauri" (one token, sent by the ModUI pair picker)
+                    string wordA = tokens.Length > 2 ? tokens[2] : "", wordB = tokens.Length > 3 ? tokens[3] : "";
+                    int plus = wordA.IndexOf('+');
+                    if (plus > 0 && wordB.Length == 0) { wordB = wordA.Substring(plus + 1); wordA = wordA.Substring(0, plus); }
+                    if (wordA.Length == 0 || wordB.Length == 0) { Reply(caller, "usage: !allyadmin force <teamA> <teamB>"); return; }
                     if (!Alliance.GameRunning) { Reply(caller, "no round in progress"); return; }
                     if (!Alliance.IsHvHvA(out string why)) { Reply(caller, why); return; }
-                    Team? a = Alliance.FindTeam(tokens[2], out string ea);
+                    Team? a = Alliance.FindTeam(wordA, out string ea);
                     if (a == null) { Reply(caller, ea); return; }
-                    Team? b = Alliance.FindTeam(tokens[3], out string eb);
+                    Team? b = Alliance.FindTeam(wordB, out string eb);
                     if (b == null) { Reply(caller, eb); return; }
                     if (ReferenceEquals(a, b)) { Reply(caller, "two different teams needed"); return; }
                     if (Alliance.Active) Alliance.Dissolve("admin_clear", "replaced by admin " + who, announce: false);

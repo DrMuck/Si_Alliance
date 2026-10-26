@@ -7,7 +7,7 @@
    !ally accept|decline    commander of the asked team (also !ally respond accept|decline)
    !ally break             commander of an allied team: alliance ends after break_grace_s
    !ally status            anyone
-   !allyadmin force <A> <B> | clear | mult <x> | status | reload      (Power.Cheat)
+   !allyadmin force <A> <B> | clear | mult <x> | status | reload      (Power.Teams)
 
  Design and decisions: docs/PLAN.md. Requires the Admin Mod (commands, chat, damage event).
 */
@@ -25,7 +25,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.1.0";
+        public const string Version = "0.1.1";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -44,7 +44,7 @@ namespace Si_Alliance
             try
             {
                 HelperMethods.RegisterPlayerCommand("ally", Commands.Command_Ally, true);
-                HelperMethods.RegisterAdminCommand("allyadmin", Commands.Command_AllyAdmin, Power.Cheat,
+                HelperMethods.RegisterAdminCommand("allyadmin", Commands.Command_AllyAdmin, Power.Teams,
                     "Alliance admin. Usage: !allyadmin force <teamA> <teamB> | clear | mult <x> | status | reload");
                 Event_Damage.OnPrePlayerDamageReceived += DamagePatches.OnPrePlayerDamage;
                 DamagePatches.Apply(HarmonyInstance);

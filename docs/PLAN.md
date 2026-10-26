@@ -116,7 +116,7 @@ team X to Y" from the server document) would fix every cosmetic row above. Not r
 - Player: `!ally <team>`, `!ally accept|decline|break|status|yes|no`. Register via
   `HelperMethods.RegisterPlayerCommand("ally", cb, hideFromChat: true)`; replies `SendChatMessageToPlayer` /
   `SendChatMessageToTeam` / `ReplyToCommand`. Commander lookup `MP_Strategy.GetCommanderForTeam(team)`.
-- Admin: `!ally force <A> <B>`, `!ally clear`, `!ally mult <x>` (Power.Cheat).
+- Admin: `!ally force <A> <B>`, `!ally clear`, `!ally mult <x>` (Power.Teams: admins from the game's own admin list have it, Cheat they do not).
 - ModUI (`ModUI_Export.cs` copy): Info line with status, Picker `team` for the request (commander-gated inside the
   handler), choice picker accept/decline, admin force/clear. Pending request shown as shared Info line (player data
   refreshes only once a minute).

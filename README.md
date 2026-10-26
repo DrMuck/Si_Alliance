@@ -20,7 +20,7 @@ Requires the [Admin Mod](https://github.com/data-bomb/Silica) (commands, chat, d
 | `!ally accept` / `!ally decline` | commander of the asked team | Answer the open request (`!ally respond accept\|decline` does the same, used by the ModUI picker). A decline blocks the requesting team for `decline_cooldown_s`. |
 | `!ally break` | commander of an ally | Announced to everyone; the alliance ends after `break_grace_s`. Once per team per round. |
 | `!ally status` | anyone | Current alliance or open request. |
-| `!allyadmin force <teamA> <teamB>` | admin (Cheat) | Ally two teams now; ignores `min_minutes` and `one_alliance_per_round` (still HvHvA only). |
+| `!allyadmin force <teamA> <teamB>` (or `<teamA>+<teamB>`) | admin (Teams) | Ally two teams now; ignores `min_minutes` and `one_alliance_per_round` (still HvHvA only). |
 | `!allyadmin clear` | admin | End the alliance or remove the open request. |
 | `!allyadmin mult <x>` | admin | Set `lone_income_mult` (1..5, saved). |
 | `!allyadmin status` | admin | Teams with FriendlyIndex, player count, commander, lost flag, dropped hit counters. |
