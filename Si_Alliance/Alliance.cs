@@ -13,6 +13,7 @@ namespace Si_Alliance
 
     /// <summary>
     /// Alliance state machine and hostility: None -> Pending -> Active -> Breaking -> None.
+    /// Pending is either a commander request (fps_vote off: the asked commander answers) or an FPS vote (Voting).
     /// Hostility is vanilla's own: both allies get the same Team.FriendlyIndex while the alliance lasts.
     /// Team is a ScriptableObject (survives rounds), so the vanilla index is always restored.
     /// </summary>
@@ -28,6 +29,12 @@ namespace Si_Alliance
         internal static Team? ReqFrom, ReqTo;
         internal static float ReqExpires;
         internal const float RequestTimeoutS = 60f;
+
+        // FPS vote (Pending + Voting): steamId -> yes per voting team; VoteA = team A votes too (fps_vote "both")
+        internal static bool Voting, VoteA;
+        static readonly Dictionary<ulong, bool> _votesA = new Dictionary<ulong, bool>();
+        static readonly Dictionary<ulong, bool> _votesB = new Dictionary<ulong, bool>();
+        static string _reqByName = "";
 
         // breaking
         internal static float BreakAt;
@@ -190,6 +197,9 @@ namespace Si_Alliance
         internal static void ClearPending()
         {
             ReqFrom = null; ReqTo = null; ReqExpires = 0f;
+            Voting = false; VoteA = false;
+            _votesA.Clear(); _votesB.Clear();
+            _reqByName = "";
             if (State == AllyState.Pending) State = AllyState.None;
         }
 
@@ -216,14 +226,183 @@ namespace Si_Alliance
             Team? from = ReqFrom, to = ReqTo;
             ClearPending();
             if (from == null || to == null) return;
-            if (Cfg.DeclineCooldownS > 0f) _cooldownUntil[from] = Time.time + Cfg.DeclineCooldownS;
+            StartCooldown(from);
             string what = expired ? "expired without an answer" : "was declined";
             MelonLogger.Msg("[ALLY] t=" + Clock(GameTime) + " " + (expired ? "EXPIRED " : "DECLINED ") + NameOf(from) + " -> " + NameOf(to) + (by != null ? " by " + by.PlayerName : ""));
             AllianceMod.ToTeam(from, "The alliance request to " + NameOf(to) + " " + what + ".");
             AllianceMod.ToTeam(to, "The alliance request of " + NameOf(from) + " " + what + ".");
         }
 
+        static void StartCooldown(Team from)
+        {
+            if (Cfg.DeclineCooldownS > 0f) _cooldownUntil[from] = Time.time + Cfg.DeclineCooldownS;
+        }
+
         static AllianceConfig Cfg => AllianceMod.Cfg;
+
+        // ------------------------------------------------------------------ FPS vote
+
+        /// <summary>Opens the FPS vote on from's proposal (fps_vote "both" -> both teams vote, "lone" -> only to votes).</summary>
+        internal static void CreateVote(Team from, Team to, Player by, bool bothVote)
+        {
+            ClearPending();
+            ReqFrom = from; ReqTo = to; ReqExpires = Time.time + Cfg.VoteS;
+            State = AllyState.Pending;
+            Voting = true; VoteA = bothVote;
+            _reqByName = by.PlayerName ?? "";
+            if (bothVote)
+            {
+                ulong id = SteamId(by);
+                if (id != 0) _votesA[id] = true;   // the proposing commander votes yes
+            }
+            MelonLogger.Msg("[ALLY] t=" + Clock(GameTime) + " VOTE " + NameOf(from) + " -> " + NameOf(to) + " by " + _reqByName + " (fps_vote " + (bothVote ? "both" : "lone") +
+                            ", " + F(Cfg.VoteS) + " s, min_turnout " + Cfg.MinTurnout.ToString("0.##", CultureInfo.InvariantCulture) + ")" + PlayersLine(from, to, null));
+            if (CheckVote(Time.time)) return;   // decided at once (nobody else can vote)
+            Team? third = null;
+            foreach (Team t in ActiveTeams())
+                if (!ReferenceEquals(t, from) && !ReferenceEquals(t, to)) { third = t; break; }
+            AllianceMod.ToAll(NameOf(from) + " proposes an alliance with " + NameOf(to) + " against " + NameOf(third) + ". Players of " +
+                              (bothVote ? NameOf(from) + " and " + NameOf(to) : NameOf(to)) + ": !ally yes | !ally no (" + F(Cfg.VoteS) + " s)");
+        }
+
+        /// <summary>Records p's vote (re-voting overwrites). Returns false with the reason when p cannot vote.</summary>
+        internal static bool RecordVote(Player p, bool yes, out string reply)
+        {
+            reply = "";
+            if (State != AllyState.Pending || !Voting || ReqFrom == null || ReqTo == null) { reply = "there is no open alliance vote"; return false; }
+            Team? team = null;
+            try { team = p.Team; } catch { }
+            Dictionary<ulong, bool> votes;
+            if (team != null && ReferenceEquals(team, ReqTo)) votes = _votesB;
+            else if (team != null && ReferenceEquals(team, ReqFrom))
+            {
+                if (!VoteA) { reply = "only " + NameOf(ReqTo) + " votes; your commander's proposal stands for " + NameOf(ReqFrom); return false; }
+                votes = _votesA;
+            }
+            else { reply = "you are not on a voting team"; return false; }
+            ulong id = SteamId(p);
+            if (id == 0) { reply = "your vote could not be recorded (no Steam ID)"; return false; }
+            bool again = votes.TryGetValue(id, out bool before);
+            votes[id] = yes;
+            MelonLogger.Msg("[ALLY] vote " + (p.PlayerName ?? "?") + " (" + NameOf(team) + "): " + (yes ? "yes" : "no") + (again && before != yes ? " (changed)" : ""));
+            reply = "your vote: " + (yes ? "YES" : "NO") + ". " + VoteTallies();
+            return true;
+        }
+
+        struct Tally
+        {
+            public int Yes, No, Humans, Needed;
+            public bool Final, Pass;
+            public string Why;
+            public int Cast => Yes + No;
+        }
+
+        /// <summary>
+        /// One voting team: counts the votes of players still on that team; Humans = Team.GetNumPlayers() now.
+        /// Passes when yes > no, at least one vote and votes >= ceil(min_turnout * Humans). Final when everybody voted.
+        /// No human players: team A passes (the proposer's word), team B passes under ai_policy "always".
+        /// </summary>
+        static Tally TallyOf(Team? team, Dictionary<ulong, bool> votes, bool isA)
+        {
+            var r = new Tally { Humans = Players(team), Why = "" };
+            if (team != null && votes.Count > 0)
+            {
+                var members = MemberIds(team);
+                foreach (var kv in votes)
+                {
+                    if (!members.Contains(kv.Key)) continue;   // left the team or the server
+                    if (kv.Value) r.Yes++; else r.No++;
+                }
+            }
+            if (r.Humans <= 0)
+            {
+                r.Final = true;
+                r.Pass = isA || Cfg.AiPolicy == "always";
+                r.Why = r.Pass ? "no players" : "no players, ai_policy " + Cfg.AiPolicy;
+                return r;
+            }
+            r.Needed = Math.Max(1, (int)Math.Ceiling(Cfg.MinTurnout * r.Humans - 1e-4));
+            r.Final = r.Cast >= r.Humans;
+            if (r.Cast == 0) r.Why = "no votes";
+            else if (r.Cast < r.Needed) r.Why = "turnout too low, " + r.Cast + " of " + r.Needed + " needed";
+            else if (r.Yes <= r.No) r.Why = "no majority";
+            else r.Pass = true;
+            return r;
+        }
+
+        static string TallyText(Team? team, Tally t) => NameOf(team) + " " + t.Yes + " yes / " + t.No + " no";
+
+        /// <summary>"Sol 3 yes / 1 no, Centauri 2 yes / 2 no" (only the voting teams).</summary>
+        internal static string VoteTallies()
+        {
+            if (!Voting) return "";
+            string b = TallyText(ReqTo, TallyOf(ReqTo, _votesB, false));
+            return VoteA ? TallyText(ReqFrom, TallyOf(ReqFrom, _votesA, true)) + ", " + b : b;
+        }
+
+        /// <summary>"Vote: Sol proposes an alliance with Centauri. Sol 3 yes / 1 no, Centauri 2 yes / 2 no, 20 s left".</summary>
+        internal static string VoteText(string secondsLeft)
+        {
+            return "Vote: " + NameOf(ReqFrom) + " proposes an alliance with " + NameOf(ReqTo) + ". " + VoteTallies() + ", " + secondsLeft + " s left";
+        }
+
+        /// <summary>
+        /// Resolves the vote when every voting team is final or the time is up: all pass -> Activate, else rejected
+        /// (decline cooldown for the proposing team). Returns true when the vote was resolved.
+        /// </summary>
+        internal static bool CheckVote(float now)
+        {
+            if (State != AllyState.Pending || !Voting || ReqFrom == null || ReqTo == null) return false;
+            Team from = ReqFrom, to = ReqTo;
+            Tally tb = TallyOf(to, _votesB, false);
+            Tally ta = VoteA ? TallyOf(from, _votesA, true) : default;
+            bool allFinal = tb.Final && (!VoteA || ta.Final);
+            if (!allFinal && now < ReqExpires) return false;
+
+            string tallies = (VoteA ? TallyText(from, ta) + ", " : "") + TallyText(to, tb);
+            string by = _reqByName;
+            if (tb.Pass && (!VoteA || ta.Pass))
+            {
+                string note = tb.Humans <= 0 ? " (" + NameOf(to) + " has no players)" : "";
+                MelonLogger.Msg("[ALLY] t=" + Clock(GameTime) + " VOTE PASSED " + NameOf(from) + " -> " + NameOf(to) + ": " + tallies + note);
+                AllianceMod.ToAll("Alliance vote passed: " + tallies + note + ".");
+                if (!Activate(from, to, "vote passed: " + tallies + note + ", proposed by " + by, out string e))
+                {
+                    ClearPending();
+                    MelonLogger.Warning("[ALLY] alliance after vote failed: " + e);
+                    AllianceMod.ToAll("The alliance could not be formed: " + e);
+                }
+                return true;
+            }
+            ClearPending();
+            StartCooldown(from);
+            string why = (VoteA ? TallyText(from, ta) + " (" + (ta.Pass ? "passed" : ta.Why) + "), " : "") +
+                         TallyText(to, tb) + " (" + (tb.Pass ? "passed" : tb.Why) + ")";
+            MelonLogger.Msg("[ALLY] t=" + Clock(GameTime) + " VOTE REJECTED " + NameOf(from) + " -> " + NameOf(to) + ": " + why + (allFinal ? "" : ", time up"));
+            AllianceMod.ToAll("Alliance " + NameOf(from) + "+" + NameOf(to) + " rejected: " + why + ".");
+            return true;
+        }
+
+        static ulong SteamId(Player? p)
+        {
+            if (p == null) return 0;
+            try { return p.PlayerID.m_ID; } catch { return 0; }
+        }
+
+        static HashSet<ulong> MemberIds(Team team)
+        {
+            var set = new HashSet<ulong>();
+            try
+            {
+                foreach (Player p in Player.Players)
+                {
+                    if (p == null) continue;
+                    try { if (ReferenceEquals(p.Team, team)) set.Add(p.PlayerID.m_ID); } catch { }
+                }
+            }
+            catch { }
+            return set;
+        }
 
         /// <summary>Forms the alliance. Callers have checked HvHvA, distinct active teams, no alliance yet.</summary>
         internal static bool Activate(Team a, Team b, string formedBy, out string error)
@@ -256,7 +435,7 @@ namespace Si_Alliance
             Active = true;
             State = AllyState.Active;
             FormedThisRound = true;
-            ReqFrom = null; ReqTo = null; ReqExpires = 0f;
+            ClearPending();   // State is Active already: only drops the request / vote tallies
             BreakAt = 0f; BreakBy = null;
             DroppedHits = 0; DroppedServerHits = 0;
 
@@ -354,6 +533,7 @@ namespace Si_Alliance
             {
                 if (ReqFrom == null || ReqTo == null || !GameRunning) { ClearPending(); return; }
                 if (HasLost(ReqFrom) || HasLost(ReqTo)) { ClearPending(); return; }
+                if (Voting) { CheckVote(now); return; }
                 if (now >= ReqExpires) Decline(null, expired: true);
                 return;
             }
@@ -401,6 +581,7 @@ namespace Si_Alliance
             switch (State)
             {
                 case AllyState.Pending:
+                    if (Voting) return VoteText(F(Math.Max(0f, ReqExpires - now)));
                     return "Pending: " + NameOf(ReqFrom) + " -> " + NameOf(ReqTo) + " (" + F(Math.Max(0f, ReqExpires - now)) + " s)";
                 case AllyState.Active:
                     return NameOf(A) + " + " + NameOf(B) + " allied vs " + NameOf(Lone);

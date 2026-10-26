@@ -10,7 +10,7 @@ namespace Si_Alliance
     // Si_ModUI export (contract: Si_ModUI README "Mod data"): mirrors the chat commands only, chat stays fully usable.
     // The panel shows the state in words (what is going on, who can act now, when it opens), the three teams with
     // players and commander, and only the player entries that make sense in the current state (answer while a request
-    // is open, break while allied, propose otherwise). The admin "ally" entry is a choice of the three team pairs.
+    // is open, vote yes/no while an FPS vote runs, break while allied, propose otherwise). The admin "ally" entry is a choice of the three team pairs.
     // Countdowns are rounded to 10 s and the round time to the minute so the server pushes few frames.
     public partial class AllianceMod
     {
@@ -25,12 +25,15 @@ namespace Si_Alliance
                 List<Team> teams = running ? Alliance.ActiveTeams() : new List<Team>();
                 string status = StatusLine(now, running);
                 string teamsLine = TeamsLine(teams);
-                string rules = "Rules: commanders propose and answer (" + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " min after the start" +
+                string who = Cfg.FpsVote == "both" ? "commanders propose, players of both teams vote (majority of votes cast, " + F0(Cfg.VoteS) + " s)"
+                           : Cfg.FpsVote == "lone" ? "commanders propose, players of the asked team vote (majority of votes cast, " + F0(Cfg.VoteS) + " s)"
+                           : "commanders propose and answer";
+                string rules = "Rules: " + who + " (" + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " min after the start" +
                                (Cfg.OneAlliancePerRound ? ", one alliance per round" : "") + "). Allies cannot damage each other; AI and turrets hold fire. " +
                                "The alliance ends when the third team is eliminated (final 1v1)" +
                                (Cfg.LoneIncomeMult > 1f ? "; the lone team harvests x" + Cfg.LoneIncomeMult.ToString("0.##", CultureInfo.InvariantCulture) : "") + ".";
                 var pairs = Pairs(teams);
-                string key = status + "|" + teamsLine + "|" + rules + "|" + Alliance.State + "|" + Cfg.Enabled + "|" + Cfg.AiPolicy + "|" + string.Join(",", pairs.ConvertAll(p => p.value));
+                string key = status + "|" + teamsLine + "|" + rules + "|" + Alliance.State + "|" + Alliance.Voting + "|" + Alliance.VoteTallies() + "|" + Cfg.Enabled + "|" + Cfg.AiPolicy + "|" + string.Join(",", pairs.ConvertAll(p => p.value));
                 if (_cache != null && key == _cacheKey) return _cache;
 
                 var x = ModUI.ModUIExport.New().Enabled(Cfg.Enabled).Info(status);
@@ -38,12 +41,25 @@ namespace Si_Alliance
                 x.Info(rules);
 
                 // ---- players (commanders) ----
-                if (Alliance.State == AllyState.Pending)
+                if (Alliance.State == AllyState.Pending && Alliance.Voting)
+                {
+                    string a = Alliance.NameOf(Alliance.ReqFrom), b = Alliance.NameOf(Alliance.ReqTo);
+                    string voters = Alliance.VoteA ? "Players of " + a + " and " + b : "Players of " + b;
+                    string how = " Majority of votes cast; at least " + (Cfg.MinTurnout * 100f).ToString("0", CultureInfo.InvariantCulture) + " % of a team must vote. Voting again changes your vote.";
+                    x.Action("!ally yes", Alliance.VoteA ? "Vote YES: ally " + a + " + " + b : "Vote YES: ally with " + a,
+                             voters + ": vote for the alliance of " + a + " and " + b + " against the third team." + how);
+                    x.Action("!ally no", "Vote NO", voters + ": vote against the alliance of " + a + " and " + b + "." + how);
+                }
+                else if (Alliance.State == AllyState.Pending)
                     x.Picker("!ally respond", "Answer " + Alliance.NameOf(Alliance.ReqFrom) + "'s request",
                              "Commander of " + Alliance.NameOf(Alliance.ReqTo) + ": accept or decline the alliance proposed by " + Alliance.NameOf(Alliance.ReqFrom) + ". A decline blocks a new request for " + Cfg.DeclineCooldownS.ToString("0", CultureInfo.InvariantCulture) + " s.",
                              false, "choice", ("accept", "Accept"), ("decline", "Decline"));
                 else if (!Alliance.Active)
-                    x.Picker("!ally", "Propose alliance", "Commander: pick the team you want to ally with against the third team. Its commander has 60 s to answer; a team without a human commander answers by server policy (" + Cfg.AiPolicy + ").", false, "team");
+                    x.Picker("!ally", "Propose alliance", "Commander: pick the team you want to ally with against the third team. " +
+                             (Cfg.FpsVote == "off"
+                                 ? "Its commander has 60 s to answer; a team without a human commander answers by server policy (" + Cfg.AiPolicy + ")."
+                                 : (Cfg.FpsVote == "both" ? "Players of both teams" : "Players of that team") + " then vote for " + F0(Cfg.VoteS) + " s (your own vote is yes); a team without a human commander " +
+                                   (Cfg.AiPolicy == "always" ? "lets its players vote." : "refuses (server policy " + Cfg.AiPolicy + ").")), false, "team");
                 if (Alliance.State == AllyState.Active)
                     x.Action("!ally break", "Break alliance", "Commander of an allied team: announced to everyone, the alliance ends " + Cfg.BreakGraceS.ToString("0", CultureInfo.InvariantCulture) + " s later. Once per team per round.");
                 x.Report("!ally status", "Status", "Current alliance, open request and rules in chat.");
@@ -53,8 +69,8 @@ namespace Si_Alliance
                     x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once, no commander vote; ignores the opening time and the one-per-round rule.", true, "choice", pairs.ToArray());
                 else
                     x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once (pick both teams); needs a running 3-team round.", true, "team,team");
-                string clearLabel = Alliance.State == AllyState.Pending ? "Cancel request (admin)" : Alliance.Active ? "Dissolve alliance (admin)" : "Dissolve / cancel (admin)";
-                x.Action("!allyadmin clear", clearLabel, "Ends the alliance at once or removes the open request; teams are hostile again.", true);
+                string clearLabel = Alliance.State == AllyState.Pending ? (Alliance.Voting ? "Cancel vote (admin)" : "Cancel request (admin)") : Alliance.Active ? "Dissolve alliance (admin)" : "Dissolve / cancel (admin)";
+                x.Action("!allyadmin clear", clearLabel, "Ends the alliance at once or cancels the open request / vote; teams are hostile again.", true);
                 x.Value("!allyadmin mult", "Lone team income multiplier", "Harvest multiplier of the team facing the alliance while it is active (1 = off, max 5). Saved to the config.", true, Cfg.LoneIncomeMult);
                 x.Report("!allyadmin status", "Admin status", "Teams with FriendlyIndex, players, commander, lost flag and dropped-hit counters in chat.", true);
                 _cache = x.Build(); _cacheKey = key;
@@ -70,6 +86,7 @@ namespace Si_Alliance
             switch (Alliance.State)
             {
                 case AllyState.Pending:
+                    if (Alliance.Voting) return Alliance.VoteText("~" + Tens(Alliance.ReqExpires - now)) + ".";
                     return "Request open: " + Alliance.NameOf(Alliance.ReqFrom) + " asks " + Alliance.NameOf(Alliance.ReqTo) + " for an alliance (" + Alliance.NameOf(Alliance.ReqTo) + "'s commander has ~" + Tens(Alliance.ReqExpires - now) + " s to answer).";
                 case AllyState.Active:
                     return "ALLIED: " + Alliance.NameOf(Alliance.A) + " + " + Alliance.NameOf(Alliance.B) + " against " + Alliance.NameOf(Alliance.Lone) +
@@ -114,6 +131,8 @@ namespace Si_Alliance
                 }
             return list;
         }
+
+        static string F0(float v) => v.ToString("0", CultureInfo.InvariantCulture);
 
         static string Tens(float seconds) => (Math.Max(0, (int)Math.Ceiling(seconds / 10f)) * 10).ToString(CultureInfo.InvariantCulture);
     }

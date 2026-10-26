@@ -14,12 +14,17 @@ namespace Si_Alliance
         [JsonProperty("enabled")] public bool Enabled = true;
         // No player request before this many minutes of game time (admin force ignores it).
         [JsonProperty("min_minutes")] public float MinMinutes = 5f;
-        // Target team without a human commander (RTS AI): "always" = accepts at once, "never" = refuses,
-        // "vote" = reserved for the FPS vote (v1 treats it as "never").
+        // Target team without a human commander (RTS AI): "always" = accepts (fps_vote off) or lets its players vote
+        // (fps_vote on; no players = passes), "never" = refuses, "vote" = reserved (treated as "never").
         [JsonProperty("ai_policy")] public string AiPolicy = "always";
-        // Reserved for the FPS ratification vote (off | both | lone). v1: only "off".
-        [JsonProperty("fps_vote")] public string FpsVote = "off";
-        [JsonProperty("quorum")] public float Quorum = 0.54f;
+        // FPS vote on a request: "both" = players of both teams vote, "lone" = only the asked team votes (the proposing
+        // commander's word stands for his team), "off" = the asked commander answers alone (0.1.x behaviour).
+        [JsonProperty("fps_vote")] public string FpsVote = "both";
+        // Vote duration in seconds (10..180).
+        [JsonProperty("vote_s")] public float VoteS = 45f;
+        // Share of a team's human players that must have voted for that team's vote to count (0..1).
+        [JsonProperty("min_turnout")] public float MinTurnout = 0.33f;
+        // 0.1.x key "quorum" is gone (ignored when an old file is loaded, dropped on the next save).
         // Seconds between "!ally break" and the end of the alliance.
         [JsonProperty("break_grace_s")] public float BreakGraceS = 30f;
         // A team whose request was declined cannot request again for this long.
@@ -43,9 +48,18 @@ namespace Si_Alliance
             {
                 if (File.Exists(Path))
                 {
-                    cfg = JsonConvert.DeserializeObject<AllianceConfig>(File.ReadAllText(Path)) ?? new AllianceConfig();
+                    string json = File.ReadAllText(Path);
+                    cfg = JsonConvert.DeserializeObject<AllianceConfig>(json) ?? new AllianceConfig();
                     MelonLogger.Msg("[ALLY] Config loaded from " + Path);
                     cfg.Sanitize();
+                    // 0.1.x files (they have "quorum") carry fps_vote "off" only because the vote was reserved then
+                    bool legacy = false;
+                    try { legacy = Newtonsoft.Json.Linq.JObject.Parse(json)["quorum"] != null; } catch { }
+                    if (legacy && cfg.FpsVote == "off")
+                    {
+                        cfg.FpsVote = "both";
+                        MelonLogger.Msg("[ALLY] Config from 0.1.x: fps_vote \"off\" (reserved then) -> \"both\"");
+                    }
                     cfg.Save();   // writes keys added by a newer version
                 }
                 else
@@ -78,10 +92,12 @@ namespace Si_Alliance
             if (MinMinutes > 120f) MinMinutes = 120f;
             AiPolicy = (AiPolicy ?? "always").Trim().ToLowerInvariant();
             if (AiPolicy != "always" && AiPolicy != "never" && AiPolicy != "vote") AiPolicy = "always";
-            FpsVote = (FpsVote ?? "off").Trim().ToLowerInvariant();
-            if (FpsVote != "off" && FpsVote != "both" && FpsVote != "lone") FpsVote = "off";
-            if (float.IsNaN(Quorum) || Quorum < 0.1f) Quorum = 0.1f;
-            if (Quorum > 1f) Quorum = 1f;
+            FpsVote = (FpsVote ?? "both").Trim().ToLowerInvariant();
+            if (FpsVote != "off" && FpsVote != "both" && FpsVote != "lone") FpsVote = "both";
+            if (float.IsNaN(VoteS) || VoteS < 10f) VoteS = 10f;
+            if (VoteS > 180f) VoteS = 180f;
+            if (float.IsNaN(MinTurnout) || MinTurnout < 0f) MinTurnout = 0f;
+            if (MinTurnout > 1f) MinTurnout = 1f;
             if (float.IsNaN(BreakGraceS) || BreakGraceS < 0f) BreakGraceS = 0f;
             if (BreakGraceS > 600f) BreakGraceS = 600f;
             if (float.IsNaN(DeclineCooldownS) || DeclineCooldownS < 0f) DeclineCooldownS = 0f;

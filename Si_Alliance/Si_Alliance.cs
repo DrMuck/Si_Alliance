@@ -4,7 +4,8 @@
  GameMode.GetTeamsAreEnemy / GetTeamsAreFriendly check: AI targeting, turrets, detection sharing, pings).
 
    !ally <team>            commander: propose an alliance to that team
-   !ally accept|decline    commander of the asked team (also !ally respond accept|decline)
+   !ally accept|decline    commander of the asked team, fps_vote off (also !ally respond accept|decline)
+   !ally yes|no            players of a voting team (fps_vote both|lone; accept/decline count as votes)
    !ally break             commander of an allied team: alliance ends after break_grace_s
    !ally status            anyone
    !allyadmin force <A> <B> | clear | mult <x> | status | reload      (Power.Teams)
@@ -25,7 +26,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.1.1";
+        public const string Version = "0.2.0";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -49,7 +50,7 @@ namespace Si_Alliance
                 Event_Damage.OnPrePlayerDamageReceived += DamagePatches.OnPrePlayerDamage;
                 DamagePatches.Apply(HarmonyInstance);
                 _registered = true;
-                MelonLogger.Msg("[ALLY] Si_Alliance v" + Version + " loaded (enabled " + Cfg.Enabled + ", ai_policy " + Cfg.AiPolicy +
+                MelonLogger.Msg("[ALLY] Si_Alliance v" + Version + " loaded (enabled " + Cfg.Enabled + ", ai_policy " + Cfg.AiPolicy + ", fps_vote " + Cfg.FpsVote +
                                 ", lone_income_mult " + Cfg.LoneIncomeMult.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "), !ally / !allyadmin registered");
             }
             catch (Exception ex) { MelonLogger.Error("[ALLY] init failed: " + ex); }

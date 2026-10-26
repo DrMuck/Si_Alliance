@@ -36,7 +36,9 @@ namespace Si_Alliance
             switch (sub)
             {
                 case "": case "help": case "?":
-                    Reply(caller, "!ally <team> (commander: propose)  -  !ally accept | decline  -  !ally break  -  !ally status");
+                    Reply(caller, Cfg.FpsVote == "off"
+                        ? "!ally <team> (commander: propose)  -  !ally accept | decline  -  !ally break  -  !ally status"
+                        : "!ally <team> (commander: propose, then " + (Cfg.FpsVote == "both" ? "both teams vote" : "the asked team votes") + ")  -  !ally yes | no (vote)  -  !ally break  -  !ally status");
                     Reply(caller, "Status: " + Alliance.StatusText(Time.time));
                     return;
                 case "status": Status(caller); return;
@@ -53,13 +55,15 @@ namespace Si_Alliance
                 {
                     string v = rest.Trim().ToLowerInvariant();
                     if (v == "accept" || v == "yes") { Accept(caller); return; }
-                    if (v == "decline" || v == "no") { DeclineCmd(caller); return; }
-                    Reply(caller, "usage: !ally accept | !ally decline");
+                    if (v == "decline" || v == "deny" || v == "reject" || v == "no") { DeclineCmd(caller); return; }
+                    Reply(caller, Alliance.Voting ? "usage: !ally yes | !ally no" : "usage: !ally accept | !ally decline");
                     return;
                 }
                 case "break": Break(caller); return;
                 case "yes": case "no":
-                    Reply(caller, "there is no FPS vote in this version (fps_vote is reserved); the commanders decide");
+                    if (Alliance.State == AllyState.Pending && !Alliance.Voting)
+                    { Reply(caller, "this request is answered by the commander of " + Alliance.NameOf(Alliance.ReqTo) + " (!ally accept | decline), there is no vote"); return; }
+                    Vote(caller, sub == "yes");
                     return;
             }
             Request(caller, string.Join(" ", tokens, 1, tokens.Length - 1));
@@ -99,26 +103,45 @@ namespace Si_Alliance
             if (Alliance.HasLost(own) || Alliance.HasLost(target)) { Reply(caller, "that team is already eliminated"); return; }
 
             Player? other = Alliance.CommanderOf(target);
+            bool vote = Cfg.FpsVote != "off";
             if (other == null)
             {
                 // no human commander (RTS AI or empty seat): config policy
                 string policy = Cfg.AiPolicy;
-                if (policy == "always")
+                if (policy != "always")
+                {
+                    Reply(caller, Alliance.NameOf(target) + " has no human commander and does not accept alliances" +
+                                  (policy == "vote" ? " (ai_policy \"vote\" is reserved, treated as \"never\")" : ""));
+                    return;
+                }
+                if (!vote)
                 {
                     MelonLogger.Msg("[ALLY] " + Alliance.NameOf(target) + " has no human commander, ai_policy=always: accepted");
                     if (!Alliance.Activate(own, target, "request " + caller.PlayerName + ", AI accepted", out string e)) Reply(caller, "alliance failed: " + e);
                     return;
                 }
-                Reply(caller, Alliance.NameOf(target) + " has no human commander and does not accept alliances" +
-                              (policy == "vote" ? " (ai_policy \"vote\" is reserved, treated as \"never\")" : ""));
+                MelonLogger.Msg("[ALLY] " + Alliance.NameOf(target) + " has no human commander, ai_policy=always: its players vote");
+            }
+            if (vote)
+            {
+                // FPS vote: the vote decides, also for the asked commander (his accept/decline is a vote)
+                Alliance.CreateVote(own, target, caller, Cfg.FpsVote == "both");
                 return;
             }
             Alliance.CreatePending(own, target, caller);
-            Reply(caller, "request sent to " + Alliance.NameOf(target) + " (" + other.PlayerName + ")");
+            Reply(caller, "request sent to " + Alliance.NameOf(target) + " (" + (other != null ? other.PlayerName : "?") + ")");
+        }
+
+        static void Vote(Player caller, bool yes)
+        {
+            bool ok = Alliance.RecordVote(caller, yes, out string reply);
+            Reply(caller, reply);
+            if (ok) Alliance.CheckVote(Time.time);
         }
 
         static void Accept(Player caller)
         {
+            if (Alliance.Voting) { Vote(caller, true); return; }
             if (Alliance.State != AllyState.Pending || Alliance.ReqFrom == null || Alliance.ReqTo == null) { Reply(caller, "there is no open alliance request"); return; }
             if (!ReferenceEquals(caller.Team, Alliance.ReqTo) || !Alliance.IsCommander(caller, Alliance.ReqTo))
             { Reply(caller, "only the commander of " + Alliance.NameOf(Alliance.ReqTo) + " can answer"); return; }
@@ -132,6 +155,7 @@ namespace Si_Alliance
 
         static void DeclineCmd(Player caller)
         {
+            if (Alliance.Voting) { Vote(caller, false); return; }
             if (Alliance.State != AllyState.Pending || Alliance.ReqTo == null) { Reply(caller, "there is no open alliance request"); return; }
             if (!ReferenceEquals(caller.Team, Alliance.ReqTo) || !Alliance.IsCommander(caller, Alliance.ReqTo))
             { Reply(caller, "only the commander of " + Alliance.NameOf(Alliance.ReqTo) + " can answer"); return; }
@@ -192,6 +216,13 @@ namespace Si_Alliance
                 {
                     if (!Alliance.Active && Alliance.State != AllyState.Pending) { Reply(caller, "there is no alliance or request"); return; }
                     if (Alliance.Active) Alliance.Dissolve("admin_clear", "cleared by admin " + who, announce: true);
+                    else if (Alliance.Voting)
+                    {
+                        string pair = Alliance.NameOf(Alliance.ReqFrom) + "+" + Alliance.NameOf(Alliance.ReqTo);
+                        MelonLogger.Msg("[ALLY] vote " + pair + " cancelled by admin " + who + " (" + Alliance.VoteTallies() + ")");
+                        Alliance.ClearPending();
+                        AllianceMod.ToAll("The alliance vote " + pair + " was cancelled by an admin.");
+                    }
                     else { Alliance.ClearPending(); Reply(caller, "open request removed"); }
                     if (caller != null) HelperMethods.AlertAdminAction(caller, "cleared the alliance");
                     return;

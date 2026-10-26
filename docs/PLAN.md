@@ -120,8 +120,8 @@ team X to Y" from the server document) would fix every cosmetic row above. Not r
 - ModUI (`ModUI_Export.cs` copy): Info line with status, Picker `team` for the request (commander-gated inside the
   handler), choice picker accept/decline, admin force/clear. Pending request shown as shared Info line (player data
   refreshes only once a minute).
-- Config `UserData/cfg/Alliance/Si_Alliance_Config.json`: enabled, min_minutes, ai_policy, fps_vote, quorum,
-  break_grace_s, decline_cooldown_s, lone_income_mult, bloc_balance, debug.
+- Config `UserData/cfg/Alliance/Si_Alliance_Config.json`: enabled, min_minutes, ai_policy, fps_vote, vote_s,
+  min_turnout (0.2.0; quorum removed), break_grace_s, decline_cooldown_s, lone_income_mult, bloc_balance, debug.
 
 ## 7. Project setup
 
@@ -149,7 +149,14 @@ TargetFinder (same GetTeamsAreEnemy call).
 
 - Alliance DISSOLVES when the lone team is eliminated -> final 1v1 showdown (vanilla End screen). Also dissolves when
   an ally is eliminated, at round end, or via `!ally break` (30 s grace, one break per team per round).
-- v1: commanders only request/accept. No FPS vote (config keys reserved: fps_vote="off", quorum=0.54).
+- v1 (0.1.x): commanders only request/accept.
+- 0.2.0: FPS vote on every request (`fps_vote` = both | lone | off, default both; `quorum` key removed). Commander of A
+  proposes; for `vote_s` (45 s) every human player of the voting teams (both: A and B, lone: only B) may vote
+  `!ally yes|no` (accept/decline count as votes, re-vote overwrites); the proposer's yes counts automatically. A team
+  passes with yes > no, >= 1 vote and votes >= ceil(`min_turnout` (0.33) * Team.GetNumPlayers()); a team with no human
+  players passes (A always, B only under ai_policy "always"). Resolves early when every voting team has voted
+  completely, otherwise at the timer; all pass -> alliance, else rejected with the decline cooldown. B without a human
+  commander: ai_policy "never" refuses at once, "always" lets B's players vote. Admin force skips the vote.
 - Player cap: bloc balance (allied pair counts as one bloc) via a hook in Si_EloMatchmaking.
 - Income multiplier: config `lone_income_mult`, default 1.0 (off); flat, not scaled by imbalance in v1.
 - RTS_AI (no human commander) team: config `ai_policy`, default "always" (AI accepts any request; AI never requests).
