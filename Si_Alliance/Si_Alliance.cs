@@ -26,7 +26,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.2.1";
+        public const string Version = "0.2.2";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -112,11 +112,19 @@ namespace Si_Alliance
             HelperMethods.SendChatMessageToTeam(t, Tag + msg);
         }
 
+        // Broadcast through the game's own server chat (Player.SendServerChatMessage, the path of vanilla's
+        // "'X' is now the Commander" lines): one call, every client, and it also raises GameEvents.OnChatMessage so
+        // chat loggers record it. Not the Admin Mod per-player helper, which the ModUI proxy captures for the caller.
         internal static void ToAll(string msg)
         {
             int n = 0; try { n = Player.Players.Count; } catch { }
             MelonLogger.Msg("[ALLY] announce to " + n + " players: " + msg);
-            HelperMethods.SendChatMessageToAll(Tag + msg);
+            try { Player.SendServerChatMessage(Tag + msg); }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning("[ALLY] SendServerChatMessage failed (" + ex.GetBaseException().Message + "), falling back to per-player send");
+                HelperMethods.SendChatMessageToAll(Tag + msg);
+            }
         }
 
         internal static void Debug(string msg)
