@@ -456,6 +456,8 @@ namespace Si_Alliance
                 ? " " + _nameLone + " may now take up to " + (_playersA + _playersB - _playersLone) + " more players."
                 : "";
             AllianceMod.ToAll(_nameA + " and " + _nameB + " are now allied against " + _nameLone + "! Allied fire does no damage." + extra);
+            _nextRemind = Time.time + Cfg.RemindS;
+            SeedSeen();
             if (Cfg.LoneIncomeMult > 1f)
                 AllianceMod.ToTeam(lone, "Your harvest income is multiplied by " + Cfg.LoneIncomeMult.ToString("0.##", CultureInfo.InvariantCulture) + " while the alliance lasts.");
             return true;
@@ -488,6 +490,7 @@ namespace Si_Alliance
             Active = false;
             State = AllyState.None;
             BreakAt = 0f; BreakBy = null;
+            ClearNotices();
 
             Restore(a); Restore(b); Restore(lone);
             Balance.OnDissolve();
@@ -543,7 +546,58 @@ namespace Si_Alliance
             if (HasLost(A)) { Dissolve("ally_eliminated", NameOf(A) + " eliminated", announce: true); return; }
             if (HasLost(B)) { Dissolve("ally_eliminated", NameOf(B) + " eliminated", announce: true); return; }
             if (State == AllyState.Breaking && now >= BreakAt) { Dissolve("break", "broken by " + NameOf(BreakBy), announce: true); return; }
+            Notices(now);
             Balance.UpdateMaxDiff();
+        }
+
+        // ------------------------------------------------------------------ reminders and join notices
+        // A one-time broadcast is lost on a busy server: the chat shows four lines and players join all the time
+        // (18 joins in the 20 min after the first live alliance, 2026-11-05). Everyone gets a reminder every remind_s,
+        // and a player who was not there at formation gets a private notice ~10 s after showing up.
+        static float _nextRemind;
+        static readonly HashSet<ulong> _seen = new HashSet<ulong>();
+        static readonly Dictionary<ulong, float> _noticeDue = new Dictionary<ulong, float>();
+        static void SeedSeen()
+        {
+            _seen.Clear(); _noticeDue.Clear();
+            try { foreach (Player p in Player.Players) { ulong id = SteamId(p); if (id != 0) _seen.Add(id); } } catch { }
+        }
+        static void ClearNotices() { _seen.Clear(); _noticeDue.Clear(); }
+        static void Notices(float now)
+        {
+            if (Cfg.RemindS > 0f && now >= _nextRemind)
+            {
+                _nextRemind = now + Cfg.RemindS;
+                AllianceMod.ToAll("Reminder: " + _nameA + " + " + _nameB + " are allied against " + _nameLone + ". Allied fire does no damage.");
+            }
+            if (!Cfg.JoinNotice) return;
+            try
+            {
+                foreach (Player p in Player.Players)
+                {
+                    if (p == null) continue;
+                    ulong id = SteamId(p);
+                    if (id == 0 || _seen.Contains(id)) continue;
+                    _seen.Add(id); _noticeDue[id] = now + 10f;
+                }
+            }
+            catch { }
+            if (_noticeDue.Count == 0) return;
+            List<ulong> due = new List<ulong>();
+            foreach (var kv in _noticeDue) if (now >= kv.Value) due.Add(kv.Key);
+            foreach (ulong id in due)
+            {
+                _noticeDue.Remove(id);
+                Player? p = FindPlayer(id);
+                if (p == null) continue;
+                AllianceMod.Reply(p, _nameA + " + " + _nameB + " are ALLIED against " + _nameLone + " this round. Allied fire does no damage. !ally status for details.");
+                MelonLogger.Msg("[ALLY] join notice to " + (p.PlayerName ?? "?"));
+            }
+        }
+        static Player? FindPlayer(ulong id)
+        {
+            try { foreach (Player p in Player.Players) if (p != null && SteamId(p) == id) return p; } catch { }
+            return null;
         }
 
         /// <summary>Drops attack orders of owner's units that point at the new ally (forced targets bypass enemy checks).</summary>

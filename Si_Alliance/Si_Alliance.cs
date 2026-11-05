@@ -26,7 +26,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -114,6 +114,8 @@ namespace Si_Alliance
 
         internal static void ToAll(string msg)
         {
+            int n = 0; try { n = Player.Players.Count; } catch { }
+            MelonLogger.Msg("[ALLY] announce to " + n + " players: " + msg);
             HelperMethods.SendChatMessageToAll(Tag + msg);
         }
 

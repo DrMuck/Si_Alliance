@@ -36,6 +36,10 @@ namespace Si_Alliance
         [JsonProperty("one_alliance_per_round")] public bool OneAlliancePerRound = true;
         // Allied team voice (server relay; unmodded clients still only play other-team voice in proximity).
         [JsonProperty("allied_voice")] public bool AlliedVoice = true;
+        /// <summary>Seconds between "X + Y are allied" reminders to everyone while an alliance is active (0 = off).</summary>
+        [JsonProperty("remind_s")] public float RemindS = 180f;
+        /// <summary>Players who join (or were absent at formation) get a private notice ~10 s after they appear.</summary>
+        [JsonProperty("join_notice")] public bool JoinNotice = true;
         [JsonProperty("debug")] public bool Debug = false;
 
         public static string Dir => System.IO.Path.Combine(MelonEnvironment.UserDataDirectory, "cfg", "Alliance");
@@ -102,6 +106,9 @@ namespace Si_Alliance
             if (BreakGraceS > 600f) BreakGraceS = 600f;
             if (float.IsNaN(DeclineCooldownS) || DeclineCooldownS < 0f) DeclineCooldownS = 0f;
             if (DeclineCooldownS > 3600f) DeclineCooldownS = 3600f;
+            if (float.IsNaN(RemindS) || RemindS < 0f) RemindS = 0f;
+            if (RemindS > 0f && RemindS < 30f) RemindS = 30f;
+            if (RemindS > 3600f) RemindS = 3600f;
             LoneIncomeMult = ClampMult(LoneIncomeMult);
         }
 

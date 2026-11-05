@@ -98,6 +98,8 @@ A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the 
 | `bloc_balance` | true | Set the Si_EloMatchmaking bloc hook. |
 | `one_alliance_per_round` | true | At most one alliance per round. |
 | `allied_voice` | true | Relay allied team voice (see limitations). |
+| `remind_s` | 180 | Seconds between "X + Y are allied against Z" reminders to everyone while an alliance is active (0 = off, min 30). |
+| `join_notice` | true | A player who joins (or was absent at formation) gets a private notice about the alliance ~10 s after appearing. |
 | `debug` | false | Extra log lines. |
 
 ## Logging
