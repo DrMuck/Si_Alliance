@@ -40,6 +40,12 @@ namespace Si_Alliance
         [JsonProperty("remind_s")] public float RemindS = 180f;
         /// <summary>Players who join (or were absent at formation) get a private notice ~10 s after they appear.</summary>
         [JsonProperty("join_notice")] public bool JoinNotice = true;
+        /// <summary>
+        /// Locked alliance (AllianceApi.ForceAlliance(.., locked: true), e.g. Si_VersusVote's 2v1) when the lone team is
+        /// eliminated: "humans_win" = the round ends at once, the allies win together (the ally with more structures is
+        /// the reported winner), "dissolve" = like an unlocked alliance, final 1v1 between the former allies.
+        /// </summary>
+        [JsonProperty("locked_end")] public string LockedEnd = "humans_win";
         [JsonProperty("debug")] public bool Debug = false;
 
         public static string Dir => System.IO.Path.Combine(MelonEnvironment.UserDataDirectory, "cfg", "Alliance");
@@ -110,6 +116,8 @@ namespace Si_Alliance
             if (RemindS > 0f && RemindS < 30f) RemindS = 30f;
             if (RemindS > 3600f) RemindS = 3600f;
             LoneIncomeMult = ClampMult(LoneIncomeMult);
+            LockedEnd = (LockedEnd ?? "humans_win").Trim().ToLowerInvariant();
+            if (LockedEnd != "humans_win" && LockedEnd != "dissolve") LockedEnd = "humans_win";
         }
 
         public static float ClampMult(float m)

@@ -30,10 +30,13 @@ namespace Si_Alliance
                            : "commanders propose and answer";
                 string rules = "Rules: " + who + " (" + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " min after the start" +
                                (Cfg.OneAlliancePerRound ? ", one alliance per round" : "") + "). Allies cannot damage each other; AI and turrets hold fire. " +
-                               "The alliance ends when the third team is eliminated (final 1v1)" +
+                               (Alliance.Active && Alliance.Locked
+                                   ? (Cfg.LockedEnd == "humans_win" ? "This round's alliance is locked (2v1): when the third team is eliminated the allies win together"
+                                                                    : "This round's alliance is locked (2v1): no break; when the third team is eliminated, final 1v1")
+                                   : "The alliance ends when the third team is eliminated (final 1v1)") +
                                (Cfg.LoneIncomeMult > 1f ? "; the lone team harvests x" + Cfg.LoneIncomeMult.ToString("0.##", CultureInfo.InvariantCulture) : "") + ".";
                 var pairs = Pairs(teams);
-                string key = status + "|" + teamsLine + "|" + rules + "|" + Alliance.State + "|" + Alliance.Voting + "|" + Alliance.VoteTallies() + "|" + Cfg.Enabled + "|" + Cfg.AiPolicy + "|" + string.Join(",", pairs.ConvertAll(p => p.value));
+                string key = status + "|" + teamsLine + "|" + rules + "|" + Alliance.State + "|" + Alliance.Locked + "|" + Alliance.Voting + "|" + Alliance.VoteTallies() + "|" + Cfg.Enabled + "|" + Cfg.AiPolicy + "|" + string.Join(",", pairs.ConvertAll(p => p.value));
                 if (_cache != null && key == _cacheKey) return _cache;
 
                 var x = ModUI.ModUIExport.New().Enabled(Cfg.Enabled).Info(status);
@@ -60,7 +63,7 @@ namespace Si_Alliance
                                  ? "Its commander has 60 s to answer; a team without a human commander answers by server policy (" + Cfg.AiPolicy + ")."
                                  : (Cfg.FpsVote == "both" ? "Players of both teams" : "Players of that team") + " then vote for " + F0(Cfg.VoteS) + " s (your own vote is yes); a team without a human commander " +
                                    (Cfg.AiPolicy == "always" ? "lets its players vote." : "refuses (server policy " + Cfg.AiPolicy + ").")), false, "team");
-                if (Alliance.State == AllyState.Active)
+                if (Alliance.State == AllyState.Active && !Alliance.Locked)
                     x.Action("!ally break", "Break alliance", "Commander of an allied team: announced to everyone, the alliance ends " + Cfg.BreakGraceS.ToString("0", CultureInfo.InvariantCulture) + " s later. Once per team per round.");
                 x.Report("!ally status", "Status", "Current alliance, open request and rules in chat.");
 
@@ -69,8 +72,13 @@ namespace Si_Alliance
                     x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once, no commander vote; ignores the opening time and the one-per-round rule.", true, "choice", pairs.ToArray());
                 else
                     x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once (pick both teams); needs a running 3-team round.", true, "team,team");
-                string clearLabel = Alliance.State == AllyState.Pending ? (Alliance.Voting ? "Cancel vote (admin)" : "Cancel request (admin)") : Alliance.Active ? "Dissolve alliance (admin)" : "Dissolve / cancel (admin)";
-                x.Action("!allyadmin clear", clearLabel, "Ends the alliance at once or cancels the open request / vote; teams are hostile again.", true);
+                if (Alliance.Active && Alliance.Locked)
+                    x.Action("!allyadmin clear --force", "Dissolve LOCKED 2v1 alliance (admin)", "Ends the locked alliance at once (set up for this round" + (Alliance.ForceReason.Length > 0 ? ": " + Alliance.ForceReason : "") + "); teams are hostile again, the round goes on as a 3-way.", true);
+                else
+                {
+                    string clearLabel = Alliance.State == AllyState.Pending ? (Alliance.Voting ? "Cancel vote (admin)" : "Cancel request (admin)") : Alliance.Active ? "Dissolve alliance (admin)" : "Dissolve / cancel (admin)";
+                    x.Action("!allyadmin clear", clearLabel, "Ends the alliance at once or cancels the open request / vote; teams are hostile again.", true);
+                }
                 x.Value("!allyadmin mult", "Lone team income multiplier", "Harvest multiplier of the team facing the alliance while it is active (1 = off, max 5). Saved to the config.", true, Cfg.LoneIncomeMult);
                 x.Report("!allyadmin status", "Admin status", "Teams with FriendlyIndex, players, commander, lost flag and dropped-hit counters in chat.", true);
                 _cache = x.Build(); _cacheKey = key;
@@ -82,6 +90,7 @@ namespace Si_Alliance
         static string StatusLine(float now, bool running)
         {
             if (!Cfg.Enabled) return "Alliances are switched off on this server.";
+            if (!running && Alliance.Active) return "Round starting: " + Alliance.Describe() + ".";
             if (!running) return "No round running.";
             switch (Alliance.State)
             {
@@ -89,7 +98,8 @@ namespace Si_Alliance
                     if (Alliance.Voting) return Alliance.VoteText("~" + Tens(Alliance.ReqExpires - now)) + ".";
                     return "Request open: " + Alliance.NameOf(Alliance.ReqFrom) + " asks " + Alliance.NameOf(Alliance.ReqTo) + " for an alliance (" + Alliance.NameOf(Alliance.ReqTo) + "'s commander has ~" + Tens(Alliance.ReqExpires - now) + " s to answer).";
                 case AllyState.Active:
-                    return "ALLIED: " + Alliance.NameOf(Alliance.A) + " + " + Alliance.NameOf(Alliance.B) + " against " + Alliance.NameOf(Alliance.Lone) +
+                    return (Alliance.Locked ? "ALLIED (locked 2v1" + (Alliance.ForceReason.Length > 0 ? ", " + Alliance.ForceReason : "") + "): " : "ALLIED: ") +
+                           Alliance.NameOf(Alliance.A) + " + " + Alliance.NameOf(Alliance.B) + " against " + Alliance.NameOf(Alliance.Lone) +
                            (Cfg.LoneIncomeMult > 1f ? " (" + Alliance.NameOf(Alliance.Lone) + " income x" + Cfg.LoneIncomeMult.ToString("0.##", CultureInfo.InvariantCulture) + ")" : "") + ".";
                 case AllyState.Breaking:
                     return "BREAKING: " + Alliance.NameOf(Alliance.A) + " + " + Alliance.NameOf(Alliance.B) + " end their alliance in ~" + Tens(Alliance.BreakAt - now) + " s.";

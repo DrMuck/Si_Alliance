@@ -171,3 +171,9 @@ TargetFinder (same GetTeamsAreEnemy call).
   type name), clears to null on dissolve/round end.
 - **Si_RTS_AI:** Intel purges known structures/bases of teams that are no longer enemies (re-check
   `Team.GetTeamsAreEnemy` for known entries each tick); no cross-mod call needed.
+- **Si_Alliance.AllianceApi (0.3.0, ApiVersion 1)**, called by Si_VersusVote by reflection: `ForceAlliance(teamA, teamB,
+  locked, reason)`, `ClearForced(reason)`, `IsActive`, `IsLocked`, `Describe()`, `LastRoundWinners`. A locked alliance
+  (the 2v1 layout of a 3-way round, formed at MissionState INIT right after `SetTeamVersusMode`) survives the round
+  start, cannot be broken by players, and with `locked_end` "humans_win" ends the round as a win of both allies when
+  the lone team is eliminated (server-side `GetWinningTeam` postfix reports the stronger ally, `MP_Strategy.EndRound()`).
+  See README "Mod API" and "Locked alliances".

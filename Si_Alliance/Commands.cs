@@ -75,6 +75,9 @@ namespace Si_Alliance
             if (!Cfg.Enabled) s += " | alliances OFF";
             if (Alliance.FormedThisRound && Cfg.OneAlliancePerRound && !Alliance.Active) s += " | no further alliance this round";
             if (Cfg.LoneIncomeMult > 1f) s += " | lone income x" + Cfg.LoneIncomeMult.ToString("0.##", CultureInfo.InvariantCulture);
+            if (Alliance.Active && Alliance.Locked)
+                s += Cfg.LockedEnd == "humans_win" ? " | if " + Alliance.NameOf(Alliance.Lone) + " is eliminated the allies win together"
+                                                   : " | if " + Alliance.NameOf(Alliance.Lone) + " is eliminated: final 1v1";
             Reply(caller, s);
         }
 
@@ -167,6 +170,7 @@ namespace Si_Alliance
             if (!Alliance.Active) { Reply(caller, "there is no alliance"); return; }
             Team? own = caller.Team;
             if (!Alliance.IsMember(own) || own == null) { Reply(caller, "your team is not in the alliance"); return; }
+            if (Alliance.Locked) { Reply(caller, "This alliance is locked (2v1)"); return; }
             if (!Alliance.IsCommander(caller, own)) { Reply(caller, "only your team's commander can break the alliance"); return; }
             if (Alliance.State == AllyState.Breaking) { Reply(caller, "the alliance is already ending: " + Alliance.StatusText(Time.time)); return; }
             if (Alliance.HasBroken(own)) { Reply(caller, "your team already broke an alliance this round"); return; }
@@ -194,13 +198,21 @@ namespace Si_Alliance
             {
                 case "force":
                 {
-                    // "!allyadmin force sol cent" or "!allyadmin force Sol+Centauri" (one token, sent by the ModUI pair picker)
-                    string wordA = tokens.Length > 2 ? tokens[2] : "", wordB = tokens.Length > 3 ? tokens[3] : "";
+                    // "!allyadmin force sol cent [lock]" or "!allyadmin force Sol+Centauri [lock]" (one token, sent by the ModUI pair picker)
+                    var words = new System.Collections.Generic.List<string>();
+                    bool lockIt = false;
+                    for (int i = 2; i < tokens.Length; i++)
+                    {
+                        string w = tokens[i].ToLowerInvariant();
+                        if (w == "lock" || w == "locked" || w == "--lock") lockIt = true; else words.Add(tokens[i]);
+                    }
+                    string wordA = words.Count > 0 ? words[0] : "", wordB = words.Count > 1 ? words[1] : "";
                     int plus = wordA.IndexOf('+');
                     if (plus > 0 && wordB.Length == 0) { wordB = wordA.Substring(plus + 1); wordA = wordA.Substring(0, plus); }
-                    if (wordA.Length == 0 || wordB.Length == 0) { Reply(caller, "usage: !allyadmin force <teamA> <teamB>"); return; }
-                    if (!Alliance.GameRunning) { Reply(caller, "no round in progress"); return; }
+                    if (wordA.Length == 0 || wordB.Length == 0) { Reply(caller, "usage: !allyadmin force <teamA> <teamB> [lock]"); return; }
+                    if (Alliance.GameOver || (!Alliance.GameRunning && !Alliance.PreStart)) { Reply(caller, "no round in progress"); return; }
                     if (!Alliance.IsHvHvA(out string why)) { Reply(caller, why); return; }
+                    if (Alliance.Active && Alliance.Locked) { Reply(caller, "the alliance is locked (2v1): !allyadmin clear --force first"); return; }
                     Team? a = Alliance.FindTeam(wordA, out string ea);
                     if (a == null) { Reply(caller, ea); return; }
                     Team? b = Alliance.FindTeam(wordB, out string eb);
@@ -208,14 +220,17 @@ namespace Si_Alliance
                     if (ReferenceEquals(a, b)) { Reply(caller, "two different teams needed"); return; }
                     if (Alliance.Active) Alliance.Dissolve("admin_clear", "replaced by admin " + who, announce: false);
                     Alliance.ClearPending();
-                    if (!Alliance.Activate(a, b, "admin " + who, out string e)) { Reply(caller, "alliance failed: " + e); return; }
-                    if (caller != null) HelperMethods.AlertAdminAction(caller, "forced an alliance of " + Alliance.NameOf(a) + " and " + Alliance.NameOf(b));
+                    if (!Alliance.Activate(a, b, "admin " + who + (lockIt ? " (locked)" : ""), true, lockIt, lockIt ? "admin" : "", out string e)) { Reply(caller, "alliance failed: " + e); return; }
+                    if (caller != null) HelperMethods.AlertAdminAction(caller, "forced " + (lockIt ? "a locked" : "an") + " alliance of " + Alliance.NameOf(a) + " and " + Alliance.NameOf(b));
                     return;
                 }
                 case "clear":
                 {
                     if (!Alliance.Active && Alliance.State != AllyState.Pending) { Reply(caller, "there is no alliance or request"); return; }
-                    if (Alliance.Active) Alliance.Dissolve("admin_clear", "cleared by admin " + who, announce: true);
+                    bool force = false;
+                    for (int i = 2; i < tokens.Length; i++) { string w = tokens[i].ToLowerInvariant(); if (w == "--force" || w == "force" || w == "-f") force = true; }
+                    if (Alliance.Active && Alliance.Locked && !force) { Reply(caller, "This alliance is locked (2v1" + (Alliance.ForceReason.Length > 0 ? ", " + Alliance.ForceReason : "") + "): !allyadmin clear --force"); return; }
+                    if (Alliance.Active) Alliance.Dissolve("admin_clear", (Alliance.Locked ? "locked, " : "") + "cleared by admin " + who, announce: true);
                     else if (Alliance.Voting)
                     {
                         string pair = Alliance.NameOf(Alliance.ReqFrom) + "+" + Alliance.NameOf(Alliance.ReqTo);
@@ -254,11 +269,12 @@ namespace Si_Alliance
                           .Append(Alliance.HasLost(t) ? ", LOST" : "").Append(']');
                     }
                     sb.Append(" | game ").Append(Alliance.F(Alliance.GameTime)).Append(" s, dropped hits ").Append(Alliance.DroppedHits).Append('/').Append(Alliance.DroppedServerHits);
+                    if (Alliance.Active) sb.Append(" | ").Append(Alliance.Describe()).Append(Alliance.Forced ? ", forced" : "").Append(Alliance.Locked ? ", locked_end " + Cfg.LockedEnd : "");
                     Reply(caller, sb.ToString());
                     return;
                 }
             }
-            Reply(caller, "!allyadmin force <teamA> <teamB> | clear | mult <x> | status | reload");
+            Reply(caller, "!allyadmin force <teamA> <teamB> [lock] | clear [--force] | mult <x> | status | reload");
         }
     }
 }

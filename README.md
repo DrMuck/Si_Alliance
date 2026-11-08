@@ -2,7 +2,9 @@
 
 Server-only MelonLoader mod for Silica: in a Humans vs Humans vs Aliens round, two commanders can form an alliance
 against the third team. When the third ("lone") team is eliminated the alliance dissolves and the two allies finish
-the round as a normal 1v1, so vanilla picks a real winner and shows the End screen.
+the round as a normal 1v1, so vanilla picks a real winner and shows the End screen. Since 0.3.0 other mods can force a
+**locked** alliance for a whole round through `AllianceApi` (Si_VersusVote's 2v1 layout: Sol + Centauri vs Aliens);
+when the Aliens are eliminated the allied humans win together (see Locked alliances).
 
 How it works: vanilla already has `Team.FriendlyIndex`. Teams that share an index > -1 are not enemies for every
 `GameMode.GetTeamsAreEnemy` / `GetTeamsAreFriendly` check (AI targeting, turrets, detection sharing, pings). The mod
@@ -19,10 +21,10 @@ Requires the [Admin Mod](https://github.com/data-bomb/Silica) (commands, chat, d
 | `!ally <team>` | commander | Propose an alliance to that team (name prefix: `sol`, `cent`, `alien`). With `fps_vote` `both`/`lone` this opens a player vote (see Vote); with `off` the other commander has 60 s to answer. A team without a human commander (RTS AI) is handled by `ai_policy`. |
 | `!ally yes` / `!ally no` | players of a voting team | Vote on the open alliance (`accept` = yes; `decline`, `deny`, `reject` = no; `!ally respond accept\|decline` likewise). Voting again overwrites your vote. |
 | `!ally accept` / `!ally decline` | commander of the asked team (`fps_vote` `off`) | Answer the open request (`!ally respond accept\|decline` does the same, used by the ModUI picker). A decline blocks the requesting team for `decline_cooldown_s`. While a vote runs these are votes. |
-| `!ally break` | commander of an ally | Announced to everyone; the alliance ends after `break_grace_s`. Once per team per round. |
+| `!ally break` | commander of an ally | Announced to everyone; the alliance ends after `break_grace_s`. Once per team per round. A locked alliance answers "This alliance is locked (2v1)". |
 | `!ally status` | anyone | Current alliance, open request or running vote with its tallies. |
-| `!allyadmin force <teamA> <teamB>` (or `<teamA>+<teamB>`) | admin (Teams) | Ally two teams now, no vote; ignores `min_minutes` and `one_alliance_per_round` (still HvHvA only). |
-| `!allyadmin clear` | admin | End the alliance, or remove the open request / cancel the running vote (announced). |
+| `!allyadmin force <teamA> <teamB> [lock]` (or `<teamA>+<teamB>`) | admin (Teams) | Ally two teams now, no vote; ignores `min_minutes` and `one_alliance_per_round` (still HvHvA only). Works from the layout choice on (countdown included). `lock` makes it a locked alliance. Refused while a locked alliance stands. |
+| `!allyadmin clear [--force]` | admin | End the alliance, or remove the open request / cancel the running vote (announced). A locked alliance needs `--force` (also `force`, `-f`); the round then goes on as a normal 3-way. |
 | `!allyadmin mult <x>` | admin | Set `lone_income_mult` (1..5, saved). |
 | `!allyadmin status` | admin | Teams with FriendlyIndex, player count, commander, lost flag, dropped hit counters. |
 | `!allyadmin reload` | admin | Re-read the config. |
@@ -43,6 +45,69 @@ players vote. `fps_vote` = `off` keeps the 0.1.x commander accept/decline.
 
 The alliance ends automatically when the lone team is eliminated (final showdown), when either ally is eliminated,
 at round end, on scene load, after `!ally break` + grace, or by `!allyadmin clear`.
+
+## Mod API (`Si_Alliance.AllianceApi`, ApiVersion 1)
+
+For other server mods, by reflection (type `Si_Alliance.AllianceApi` in assembly `Si_Alliance`). Main thread, server
+only; nothing throws, failures return false and are logged (`[ALLY] API ... refused: <why>`).
+
+```csharp
+public static class AllianceApi {
+  public const int ApiVersion = 1;
+  public static bool ForceAlliance(string teamA, string teamB, bool locked, string reason);
+  public static bool ClearForced(string reason);
+  public static bool IsActive { get; }
+  public static bool IsLocked { get; }
+  public static string Describe();          // "Sol+Centauri vs Alien (locked, 2v1 IndustrialQuarter)"
+  public static string LastRoundWinners { get; }   // "Sol+Centauri" after a humans_win end until the next restart, else ""
+}
+```
+
+- `ForceAlliance` = `!allyadmin force A B` without the chat: forms the alliance at once, bypassing `enabled`,
+  `min_minutes`, `one_alliance_per_round` and the vote / accept flow; an open request or vote is cancelled. Team names:
+  `TeamShortName` or `TeamName`, case-insensitive, an unambiguous prefix also works (`Sol`, `Centauri`, `Alien`). Works
+  from `MP_Strategy.SetTeamVersusMode(HUMANS_VS_HUMANS_VS_ALIENS)` on, i.e. during MissionState INIT with no players,
+  units or commanders (it only needs the active team setups of the layout and `Team.FriendlyIndex`). An alliance formed
+  before the start survives `OnGameStarted` (announced again at the start; players who join later get the join notice).
+  Returns false when: not initialised (Admin Mod missing) / not the server, no Strategy mode, the round is over, the
+  layout is not HvHvA (3 active teams), a team is not found / both names are the same team / a team is already
+  eliminated, or a different pair is allied. The same pair already allied returns true (and `locked` locks it).
+- `ClearForced` dissolves an alliance formed by the API or `!allyadmin force` (locked or not; CSV reason `api_clear`),
+  false when there is none or the active one was formed by players.
+- `IsActive`: any alliance (also while breaking). `IsLocked`: the active alliance is locked.
+- Reset: a locked alliance (like every alliance) ends at round end, scene load and `MP_Strategy.Restart` (prefix: the
+  next-map vote picking the same map restarts without a scene load).
+
+## Locked alliances (2v1)
+
+`ForceAlliance(.., locked: true, ..)` or `!allyadmin force A B lock`:
+
+- players cannot break it (`!ally break` -> "This alliance is locked (2v1)", no Break entry in the ModUI panel);
+  admins need `!allyadmin clear --force`; `!allyadmin force` of another pair is refused while it stands;
+- allied damage stays zeroed, allied voice as for any alliance, reminders and join notices say "This round is 2v1: ...";
+- **lone team eliminated**, `locked_end` = `humans_win` (default): the round ends at once and the allies win together.
+  Vanilla only ends a round when at most one team setup is not lost (`MP_Strategy.GetShouldEndGame`) and only knows one
+  winner (`GetWinningTeam`), so with two allied survivors it would never end. The mod broadcasts "Sol and Centauri win
+  together (2v1)! Alien is eliminated.", sets the reported winner to the ally with more standing structures (tie: more
+  players, tie: the first team), and calls `MP_Strategy.EndRound()` (as `!endround` does) -> `OnMissionStateChanged(ENDED)`
+  -> `GetWinningTeam()` (postfix: replaces vanilla's null with that ally, server only) -> `GameEvents.OnGameEnded(winner)`
+  (Elo, loggers) -> the alliance is dissolved with CSV reason `humans_win`. `AllianceApi.LastRoundWinners` = `Sol+Centauri`
+  until the next restart. `locked_end` = `dissolve`: the 0.2 behaviour, final 1v1 between the former allies;
+- **one ally eliminated**: the alliance dissolves (`ally_eliminated`) and the round goes on as the survivor vs the lone
+  team, ended by vanilla as usual.
+
+**Client view of a humans_win end:** clients compute `GetWinningTeam` themselves from their own team state and see two
+survivors, so they get no End screen (the same as after an admin `!endround`): the death camera runs for the restart
+delay (30 s), then the next-map vote. The chat line names the winners. A real End screen would need one ally to
+actually lose (all critical structures destroyed) or a client mod.
+
+**Si_EloMatchmaking:** bloc balance works from the moment the alliance is formed, also at INIT: Elo reads
+`AllianceHook.GroupOf` live for every join, redirect, `!reserve` and ask (no caching), so players joining during the
+countdown or later are balanced as Sol+Centauri bloc vs Alien (the bloc counts are compared, not Sol vs Centauri inside
+the bloc; with 2 blocs Elo uses its 2-team MaxDifference formula). Rating: Elo rates the reported winner only; it
+pairs the winner against every other commanded team, so after a humans_win end the second ally's commander and
+players are rated as losers against the first ally. Elo needs a change to read `AllianceApi.LastRoundWinners` (or
+`GroupOf`, which may already be null: Si_Alliance dissolves in its own OnGameEnded handler) and skip the ally pair.
 
 ## What it does while an alliance is active
 
@@ -76,7 +141,9 @@ Clients keep their own FriendlyIndex (it is not networked), so on every client:
 - allied voice: the server relays team voice to the ally, but an unmodded client only plays other-team voice within
   proximity range (200 m), so in practice allied voice reaches only nearby players.
 
-The alliance always dissolves before the round can end with two allied survivors, so the End screen and winner work.
+An unlocked alliance always dissolves before the round can end with two allied survivors, so the End screen and
+winner work. A locked one with `locked_end` `humans_win` ends the round itself (see Locked alliances: no client End
+screen).
 A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the cosmetic rows.
 
 ## Config
@@ -100,14 +167,19 @@ A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the 
 | `allied_voice` | true | Relay allied team voice (see limitations). |
 | `remind_s` | 180 | Seconds between "X + Y are allied against Z" reminders to everyone while an alliance is active (0 = off, min 30). |
 | `join_notice` | true | A player who joins (or was absent at formation) gets a private notice about the alliance ~10 s after appearing. |
+| `locked_end` | `humans_win` | Locked alliance, lone team eliminated: `humans_win` = the round ends, the allies win together (stronger ally reported as winner); `dissolve` = final 1v1 like an unlocked alliance. |
 | `debug` | false | Extra log lines. |
 
 ## Logging
 
 Every state change is logged with the tag `[ALLY]`, game time and player counts per team. Each finished alliance
 appends a line to `UserData/cfg/Alliance/log/alliances.csv`: date, map, formation time, teams, lone team, players per
-team at formation, who formed it (for a vote: `vote passed: Sol 3 yes / 1 no, Centauri 2 yes / 0 no, proposed by X`), end time, reason (`lone_eliminated`, `ally_eliminated`, `round_end`, `break`,
-`admin_clear`, `scene_load`), outcome, harvest per team during the alliance, lone bonus paid, dropped hit counters.
+team at formation, who formed it (for a vote: `vote passed: Sol 3 yes / 1 no, Centauri 2 yes / 0 no, proposed by X`; API:
+`api locked: 2v1 IndustrialQuarter`; admin: `admin Name (locked)`), end time, reason (`lone_eliminated`, `ally_eliminated`,
+`round_end`, `humans_win`, `break`, `admin_clear`, `api_clear`, `scene_load`, `restart`), outcome (humans_win:
+`Sol+Centauri win together (2v1), reported winner Sol (structures Sol 14 / Centauri 9, players 6 / 5)`), harvest per
+team during the alliance, lone bonus paid, dropped hit counters. A pre-start alliance's formation time and player counts
+are taken again at the round start.
 
 ## Si_ModUI
 

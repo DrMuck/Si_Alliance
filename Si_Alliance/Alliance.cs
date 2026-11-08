@@ -25,6 +25,23 @@ namespace Si_Alliance
 
         internal static AllyState State = AllyState.None;
 
+        // ---- forced / locked (AllianceApi, !allyadmin force) ----
+        /// <summary>Formed by AllianceApi.ForceAlliance or !allyadmin force (ClearForced removes only such an alliance).</summary>
+        internal static bool Forced;
+        /// <summary>Locked (2v1): no !ally break, admin clear needs --force, locked_end applies when the lone team dies.</summary>
+        internal static bool Locked;
+        /// <summary>Formed before the round started (MissionState INIT, after SetTeamVersusMode): survives OnGameStarted.</summary>
+        internal static bool FormedPreStart;
+        /// <summary>Reason given by the API caller ("2v1 IndustrialQuarter"), shown by Describe().</summary>
+        internal static string ForceReason = "";
+        /// <summary>Server-side winner reported by MP_Strategy.GetWinningTeam after a humans_win end (null otherwise).</summary>
+        internal static Team? ForcedWinner;
+        /// <summary>"Sol+Centauri" after a humans_win end until the next restart, "" otherwise (AllianceApi.LastRoundWinners).</summary>
+        internal static string LastRoundWinners = "";
+        // reason/outcome the next OnGameEnded dissolve writes (set right before our own EndRound call)
+        static string? _endReason, _endOutcome;
+        static bool _endingRound;
+
         // pending request
         internal static Team? ReqFrom, ReqTo;
         internal static float ReqExpires;
@@ -79,6 +96,17 @@ namespace Si_Alliance
         internal static bool GameRunning
         {
             get { var gm = GameMode.CurrentGameMode; return gm != null && gm.GameOngoing; }
+        }
+
+        /// <summary>MissionState INIT (layout vote, countdown): not begun and not over.</summary>
+        internal static bool PreStart
+        {
+            get { var gm = GameMode.CurrentGameMode; return gm != null && !gm.GameBegun && !gm.GameOver; }
+        }
+
+        internal static bool GameOver
+        {
+            get { var gm = GameMode.CurrentGameMode; return gm != null && gm.GameOver; }
         }
 
         /// <summary>Teams of the active strategy team setups (Sol, Centauri, Alien in HvHvA).</summary>
@@ -405,7 +433,13 @@ namespace Si_Alliance
         }
 
         /// <summary>Forms the alliance. Callers have checked HvHvA, distinct active teams, no alliance yet.</summary>
-        internal static bool Activate(Team a, Team b, string formedBy, out string error)
+        internal static bool Activate(Team a, Team b, string formedBy, out string error) => Activate(a, b, formedBy, false, false, "", out error);
+
+        /// <summary>
+        /// forced: formed by an admin or AllianceApi (ClearForced may remove it). locked: 2v1 for the whole round (see Locked).
+        /// Works during MissionState INIT (teams exist once SetTeamVersusMode ran; no units, commanders or players needed).
+        /// </summary>
+        internal static bool Activate(Team a, Team b, string formedBy, bool forced, bool locked, string forceReason, out string error)
         {
             error = "";
             if (!Game.GetIsServer()) { error = "server only"; return false; }
@@ -435,6 +469,8 @@ namespace Si_Alliance
             Active = true;
             State = AllyState.Active;
             FormedThisRound = true;
+            Forced = forced; Locked = locked; ForceReason = forceReason ?? "";
+            FormedPreStart = PreStart;
             ClearPending();   // State is Active already: only drops the request / vote tallies
             BreakAt = 0f; BreakBy = null;
             DroppedHits = 0; DroppedServerHits = 0;
@@ -450,17 +486,45 @@ namespace Si_Alliance
             Balance.UpdateMaxDiff();
 
             MelonLogger.Msg("[ALLY] t=" + Clock(_formGameTime) + " ACTIVE " + _nameA + " + " + _nameB + " vs " + _nameLone + " (" + formedBy + ")" +
+                            (Locked ? " LOCKED (locked_end " + Cfg.LockedEnd + ")" : "") + (FormedPreStart ? " before the round start" : "") +
                             PlayersLine(a, b, lone) + ", FriendlyIndex " + _vanillaIndex[a] + "/" + _vanillaIndex[b] + " -> " + idx +
                             ", forced targets cleared " + cleared + ", Elo bloc hook " + (hook ? "set" : "not set"));
             string extra = (hook || Balance.OriginalMaxDiff > 0) && _playersLone < _playersA + _playersB
                 ? " " + _nameLone + " may now take up to " + (_playersA + _playersB - _playersLone) + " more players."
                 : "";
-            AllianceMod.ToAll(_nameA + " and " + _nameB + " are now allied against " + _nameLone + "! Allied fire does no damage." + extra);
+            if (Locked)
+                AllianceMod.ToAll(LockedLine() + " Allied fire does no damage." + extra);
+            else
+                AllianceMod.ToAll(_nameA + " and " + _nameB + " are now allied against " + _nameLone + "! Allied fire does no damage." + extra);
             _nextRemind = Time.time + Cfg.RemindS;
             SeedSeen();
             if (Cfg.LoneIncomeMult > 1f)
                 AllianceMod.ToTeam(lone, "Your harvest income is multiplied by " + Cfg.LoneIncomeMult.ToString("0.##", CultureInfo.InvariantCulture) + " while the alliance lasts.");
             return true;
+        }
+
+        /// <summary>"This round is 2v1: Sol + Centauri vs Alien (locked alliance, ...). ..." for announcements.</summary>
+        internal static string LockedLine()
+        {
+            string end = Cfg.LockedEnd == "humans_win"
+                ? "If " + _nameLone + " is eliminated, " + _nameA + " and " + _nameB + " win together."
+                : "If " + _nameLone + " is eliminated, " + _nameA + " and " + _nameB + " fight it out (final 1v1).";
+            return "This round is 2v1: " + _nameA + " + " + _nameB + " vs " + _nameLone + " (locked alliance" +
+                   (ForceReason.Length > 0 ? ", " + ForceReason : "") + "). " + end;
+        }
+
+        /// <summary>AllianceApi.Describe: "Sol+Centauri vs Alien (locked, 2v1 IndustrialQuarter)".</summary>
+        internal static string Describe()
+        {
+            if (Active)
+            {
+                string why = ForceReason.Length > 0 ? ForceReason : _formedBy;
+                string tags = (Locked ? "locked" : "") + (State == AllyState.Breaking ? (Locked ? ", " : "") + "breaking" : "");
+                string inner = tags.Length > 0 && why.Length > 0 ? tags + ", " + why : tags + why;
+                return NameOf(A) + "+" + NameOf(B) + " vs " + NameOf(Lone) + (inner.Length > 0 ? " (" + inner + ")" : "");
+            }
+            if (LastRoundWinners.Length > 0) return "No alliance (" + LastRoundWinners + " won together)";
+            return StatusText(Time.time);
         }
 
         internal static void StartBreak(Team by, Player caller)
@@ -487,20 +551,23 @@ namespace Si_Alliance
                 return;
             }
             Team? a = A, b = B, lone = Lone;
+            bool wasLocked = Locked;
             Active = false;
             State = AllyState.None;
             BreakAt = 0f; BreakBy = null;
+            Forced = false; Locked = false; FormedPreStart = false;
             ClearNotices();
 
             Restore(a); Restore(b); Restore(lone);
             Balance.OnDissolve();
 
             float tEnd = GameTime;
-            MelonLogger.Msg("[ALLY] t=" + Clock(tEnd) + " DISSOLVED " + _nameA + " + " + _nameB + " (" + reason + ", " + outcome + "), lasted " +
+            MelonLogger.Msg("[ALLY] t=" + Clock(tEnd) + " DISSOLVED " + (wasLocked ? "locked " : "") + _nameA + " + " + _nameB + " (" + reason + ", " + outcome + "), lasted " +
                             Clock(tEnd - _formGameTime) + PlayersLine(a, b, lone) + ", dropped player hits " + DroppedHits + ", server hits " + DroppedServerHits +
                             ", " + Balance.TotalsLine(a, b, lone));
             WriteCsv(tEnd, reason, outcome, a, b, lone);
             A = null; B = null; Lone = null;
+            ForceReason = "";
 
             if (!announce) return;
             switch (reason)
@@ -541,13 +608,121 @@ namespace Si_Alliance
                 return;
             }
             if (!Active) return;
-            if (!GameRunning) return;   // OnGameEnded dissolves
-            if (HasLost(Lone)) { Dissolve("lone_eliminated", "showdown " + NameOf(A) + " vs " + NameOf(B), announce: true); return; }
+            if (!GameRunning)
+            {
+                // formed before the start (AllianceApi at MissionState INIT): players join teams during the countdown, keep
+                // the vanilla join gate in step; after the end OnGameEnded dissolves
+                if (PreStart) Balance.UpdateMaxDiff();
+                return;
+            }
+            if (HasLost(Lone))
+            {
+                if (Locked && Cfg.LockedEnd == "humans_win" && !HasLost(A) && !HasLost(B)) { HumansWin(); return; }
+                Dissolve("lone_eliminated", "showdown " + NameOf(A) + " vs " + NameOf(B), announce: true);
+                return;
+            }
             if (HasLost(A)) { Dissolve("ally_eliminated", NameOf(A) + " eliminated", announce: true); return; }
             if (HasLost(B)) { Dissolve("ally_eliminated", NameOf(B) + " eliminated", announce: true); return; }
             if (State == AllyState.Breaking && now >= BreakAt) { Dissolve("break", "broken by " + NameOf(BreakBy), announce: true); return; }
             Notices(now);
             Balance.UpdateMaxDiff();
+        }
+
+        // ------------------------------------------------------------------ locked end: the allies win together
+        // Vanilla (MP_Strategy.GetShouldEndGame / GetWinningTeam) ends a round only when at most one team setup is not lost
+        // and knows one winner. With two allied survivors the round would never end, so the mod ends it itself:
+        // ForcedWinner (the ally with more standing structures, tie: more players, tie: A) is what the GetWinningTeam postfix
+        // reports on the server, then MP_Strategy.EndRound() -> OnMissionStateChanged(ENDED) -> GameEvents.OnGameEnded(winner).
+        // Clients compute GetWinningTeam themselves (two survivors -> null), so they get no End screen (as after an admin
+        // !endround): death cam, then the next-map vote. The chat line tells everyone who won.
+
+        internal static void HumansWin()
+        {
+            if (_endingRound || A == null || B == null) return;
+            var mode = GameMode.CurrentGameMode as MP_Strategy;
+            if (mode == null) return;
+            Team a = A, b = B;
+            int sa = StandingStructures(a), sb = StandingStructures(b), pa = Players(a), pb = Players(b);
+            Team w = sa > sb ? a : sb > sa ? b : pa >= pb ? a : b;
+            string pair = _nameA + "+" + _nameB;
+            ForcedWinner = w;
+            LastRoundWinners = pair;
+            _endReason = "humans_win";
+            _endOutcome = pair + " win together (2v1), reported winner " + NameOf(w) + " (structures " + _nameA + " " + sa + " / " + _nameB + " " + sb +
+                          ", players " + pa + " / " + pb + ")";
+            MelonLogger.Msg("[ALLY] t=" + Clock(GameTime) + " LOCKED END humans_win: " + _nameLone + " eliminated, " + _endOutcome + ", ending the round");
+            AllianceMod.ToAll(_nameA + " and " + _nameB + " win together (2v1)! " + _nameLone + " is eliminated.");
+            _endingRound = true;
+            try { mode.EndRound(); }
+            catch (Exception ex) { MelonLogger.Error("[ALLY] EndRound failed: " + ex); }
+            finally { _endingRound = false; }
+            if (Active && GameRunning)
+            {
+                // EndRound did not end it (should not happen on a server): fall back to the unlocked behaviour
+                MelonLogger.Warning("[ALLY] round still running after EndRound, dissolving into the final 1v1");
+                ForcedWinner = null; LastRoundWinners = ""; _endReason = null; _endOutcome = null;
+                Dissolve("lone_eliminated", "showdown " + NameOf(A) + " vs " + NameOf(B) + " (humans_win end failed)", announce: true);
+            }
+        }
+
+        static int StandingStructures(Team t)
+        {
+            int n = 0;
+            try
+            {
+                var list = t.Structures;
+                if (list == null) return 0;
+                for (int i = 0; i < list.Count; i++) { Structure s = list[i]; if (s != null && !s.IsDestroyed) n++; }
+            }
+            catch { }
+            return n;
+        }
+
+        /// <summary>GameEvents.OnGameEnded: dissolve, with the humans_win reason when our own EndRound caused it.</summary>
+        internal static void OnRoundEnded(Team? winner)
+        {
+            string reason = _endReason ?? "round_end";
+            string outcome = _endOutcome ?? "winner=" + (winner != null ? NameOf(winner) : "none");
+            _endReason = null; _endOutcome = null;
+            Dissolve(reason, outcome, announce: false);
+            ClearPending();
+        }
+
+        /// <summary>GameEvents.OnGameStarted: an alliance formed before the start (AllianceApi at INIT) stays, anything else goes.</summary>
+        internal static void OnRoundStarted()
+        {
+            ForcedWinner = null;
+            LastRoundWinners = "";
+            if (Active && FormedPreStart)
+            {
+                ClearPending();
+                _brokeThisRound.Clear();
+                _cooldownUntil.Clear();
+                Balance.ResetRound();   // harvest totals count from the start
+                FormedThisRound = true;
+                FormedPreStart = false;
+                _formGameTime = GameTime;
+                _playersA = Players(A); _playersB = Players(B); _playersLone = Players(Lone);
+                MelonLogger.Msg("[ALLY] round started with the " + (Locked ? "locked " : "") + "alliance " + _nameA + " + " + _nameB + " vs " + _nameLone + PlayersLine(A, B, Lone));
+                AllianceMod.ToAll(Locked ? LockedLine() + " Allied fire does no damage."
+                                         : _nameA + " and " + _nameB + " are allied against " + _nameLone + " this round. Allied fire does no damage.");
+                _nextRemind = Time.time + Cfg.RemindS;
+                SeedSeen();
+                Balance.UpdateMaxDiff();
+                return;
+            }
+            Dissolve("round_start", "-", announce: false);
+            ResetRound();
+        }
+
+        /// <summary>Prefix MP_Strategy.Restart (same-map replay via the next-map vote, scene start): the old round's state goes.</summary>
+        internal static void OnRestart()
+        {
+            Dissolve("restart", "-", announce: false);
+            ResetRound();
+            ForcedWinner = null;
+            LastRoundWinners = "";
+            _endReason = null; _endOutcome = null;
         }
 
         // ------------------------------------------------------------------ reminders and join notices
@@ -568,7 +743,8 @@ namespace Si_Alliance
             if (Cfg.RemindS > 0f && now >= _nextRemind)
             {
                 _nextRemind = now + Cfg.RemindS;
-                AllianceMod.ToAll("Reminder: " + _nameA + " + " + _nameB + " are allied against " + _nameLone + ". Allied fire does no damage.");
+                AllianceMod.ToAll(Locked ? "Reminder: " + LockedLine()
+                                         : "Reminder: " + _nameA + " + " + _nameB + " are allied against " + _nameLone + ". Allied fire does no damage.");
             }
             if (!Cfg.JoinNotice) return;
             try
@@ -590,7 +766,8 @@ namespace Si_Alliance
                 _noticeDue.Remove(id);
                 Player? p = FindPlayer(id);
                 if (p == null) continue;
-                AllianceMod.Reply(p, _nameA + " + " + _nameB + " are ALLIED against " + _nameLone + " this round. Allied fire does no damage. !ally status for details.");
+                AllianceMod.Reply(p, Locked ? LockedLine() + " Allied fire does no damage."
+                                            : _nameA + " + " + _nameB + " are ALLIED against " + _nameLone + " this round. Allied fire does no damage. !ally status for details.");
                 MelonLogger.Msg("[ALLY] join notice to " + (p.PlayerName ?? "?"));
             }
         }
@@ -638,7 +815,7 @@ namespace Si_Alliance
                     if (Voting) return VoteText(F(Math.Max(0f, ReqExpires - now)));
                     return "Pending: " + NameOf(ReqFrom) + " -> " + NameOf(ReqTo) + " (" + F(Math.Max(0f, ReqExpires - now)) + " s)";
                 case AllyState.Active:
-                    return NameOf(A) + " + " + NameOf(B) + " allied vs " + NameOf(Lone);
+                    return NameOf(A) + " + " + NameOf(B) + " allied vs " + NameOf(Lone) + (Locked ? " (locked 2v1" + (ForceReason.Length > 0 ? ", " + ForceReason : "") + ")" : "");
                 case AllyState.Breaking:
                     return NameOf(A) + " + " + NameOf(B) + " allied vs " + NameOf(Lone) + ", breaking in " + F(Math.Max(0f, BreakAt - now)) + " s";
                 default:

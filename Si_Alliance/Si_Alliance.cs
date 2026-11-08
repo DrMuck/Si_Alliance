@@ -6,9 +6,11 @@
    !ally <team>            commander: propose an alliance to that team
    !ally accept|decline    commander of the asked team, fps_vote off (also !ally respond accept|decline)
    !ally yes|no            players of a voting team (fps_vote both|lone; accept/decline count as votes)
-   !ally break             commander of an allied team: alliance ends after break_grace_s
+   !ally break             commander of an allied team: alliance ends after break_grace_s (not a locked one)
    !ally status            anyone
-   !allyadmin force <A> <B> | clear | mult <x> | status | reload      (Power.Teams)
+   !allyadmin force <A> <B> [lock] | clear [--force] | mult <x> | status | reload      (Power.Teams)
+
+ Mods: AllianceApi (ForceAlliance / ClearForced / IsActive / IsLocked / Describe), e.g. Si_VersusVote's locked 2v1 round.
 
  Design and decisions: docs/PLAN.md. Requires the Admin Mod (commands, chat, damage event).
 */
@@ -26,7 +28,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.2.2";
+        public const string Version = "0.3.0";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -46,12 +48,13 @@ namespace Si_Alliance
             {
                 HelperMethods.RegisterPlayerCommand("ally", Commands.Command_Ally, true);
                 HelperMethods.RegisterAdminCommand("allyadmin", Commands.Command_AllyAdmin, Power.Teams,
-                    "Alliance admin. Usage: !allyadmin force <teamA> <teamB> | clear | mult <x> | status | reload");
+                    "Alliance admin. Usage: !allyadmin force <teamA> <teamB> [lock] | clear [--force] | mult <x> | status | reload");
                 Event_Damage.OnPrePlayerDamageReceived += DamagePatches.OnPrePlayerDamage;
                 DamagePatches.Apply(HarmonyInstance);
+                RoundPatches.Apply(HarmonyInstance);
                 _registered = true;
                 MelonLogger.Msg("[ALLY] Si_Alliance v" + Version + " loaded (enabled " + Cfg.Enabled + ", ai_policy " + Cfg.AiPolicy + ", fps_vote " + Cfg.FpsVote +
-                                ", lone_income_mult " + Cfg.LoneIncomeMult.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "), !ally / !allyadmin registered");
+                                ", lone_income_mult " + Cfg.LoneIncomeMult.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ", locked_end " + Cfg.LockedEnd + "), !ally / !allyadmin registered, AllianceApi v" + AllianceApi.ApiVersion);
             }
             catch (Exception ex) { MelonLogger.Error("[ALLY] init failed: " + ex); }
         }
@@ -60,7 +63,7 @@ namespace Si_Alliance
         {
             if (!_registered) return;
             Alliance.Dissolve("scene_load", "-", announce: false);
-            Alliance.ResetRound();
+            Alliance.OnRestart();
             GameEvents.OnGameStarted -= OnGameStarted; GameEvents.OnGameStarted += OnGameStarted;
             GameEvents.OnGameEnded -= OnGameEnded; GameEvents.OnGameEnded += OnGameEnded;
             GameEvents.OnResourcesHarvested -= Balance.OnResourcesHarvested; GameEvents.OnResourcesHarvested += Balance.OnResourcesHarvested;
@@ -70,8 +73,7 @@ namespace Si_Alliance
         {
             try
             {
-                Alliance.Dissolve("round_start", "-", announce: false);
-                Alliance.ResetRound();
+                Alliance.OnRoundStarted();   // keeps an alliance formed before the start (AllianceApi at INIT)
             }
             catch (Exception ex) { MelonLogger.Error("[ALLY] OnGameStarted: " + ex); }
         }
@@ -80,8 +82,7 @@ namespace Si_Alliance
         {
             try
             {
-                Alliance.Dissolve("round_end", "winner=" + (winner != null ? Alliance.NameOf(winner) : "none"), announce: false);
-                Alliance.ClearPending();
+                Alliance.OnRoundEnded(winner);
             }
             catch (Exception ex) { MelonLogger.Error("[ALLY] OnGameEnded: " + ex); }
         }
