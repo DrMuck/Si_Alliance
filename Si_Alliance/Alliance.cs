@@ -284,7 +284,7 @@ namespace Si_Alliance
                 if (id != 0) _votesA[id] = true;   // the proposing commander votes yes
             }
             MelonLogger.Msg("[ALLY] t=" + Clock(GameTime) + " VOTE " + NameOf(from) + " -> " + NameOf(to) + " by " + _reqByName + " (fps_vote " + (bothVote ? "both" : "lone") +
-                            ", " + F(Cfg.VoteS) + " s, min_turnout " + Cfg.MinTurnout.ToString("0.##", CultureInfo.InvariantCulture) + ")" + PlayersLine(from, to, null));
+                            ", " + F(Cfg.VoteS) + " s)" + PlayersLine(from, to, null));
             if (CheckVote(Time.time)) return;   // decided at once (nobody else can vote)
             Team? third = null;
             foreach (Team t in ActiveTeams())
@@ -319,7 +319,7 @@ namespace Si_Alliance
 
         struct Tally
         {
-            public int Yes, No, Humans, Needed;
+            public int Yes, No, Humans;
             public bool Final, Pass;
             public string Why;
             public int Cast => Yes + No;
@@ -327,7 +327,7 @@ namespace Si_Alliance
 
         /// <summary>
         /// One voting team: counts the votes of players still on that team; Humans = Team.GetNumPlayers() now.
-        /// Passes when yes > no, at least one vote and votes >= ceil(min_turnout * Humans). Final when everybody voted.
+        /// Passes when yes > no among the votes cast, whatever the team's size (tie or no votes = not passed). Final when everybody voted.
         /// No human players: team A passes (the proposer's word), team B passes under ai_policy "always".
         /// </summary>
         static Tally TallyOf(Team? team, Dictionary<ulong, bool> votes, bool isA)
@@ -349,10 +349,8 @@ namespace Si_Alliance
                 r.Why = r.Pass ? "no players" : "no players, ai_policy " + Cfg.AiPolicy;
                 return r;
             }
-            r.Needed = Math.Max(1, (int)Math.Ceiling(Cfg.MinTurnout * r.Humans - 1e-4));
             r.Final = r.Cast >= r.Humans;
             if (r.Cast == 0) r.Why = "no votes";
-            else if (r.Cast < r.Needed) r.Why = "turnout too low, " + r.Cast + " of " + r.Needed + " needed";
             else if (r.Yes <= r.No) r.Why = "no majority";
             else r.Pass = true;
             return r;
@@ -684,6 +682,7 @@ namespace Si_Alliance
             string reason = _endReason ?? "round_end";
             string outcome = _endOutcome ?? "winner=" + (winner != null ? NameOf(winner) : "none");
             _endReason = null; _endOutcome = null;
+            IntroArmed = false;
             Dissolve(reason, outcome, announce: false);
             ClearPending();
         }
@@ -693,6 +692,7 @@ namespace Si_Alliance
         {
             ForcedWinner = null;
             LastRoundWinners = "";
+            IntroArmed = true; _introNext = 0f;   // IntroTick decides at intro_s whether it is sent
             if (Active && FormedPreStart)
             {
                 ClearPending();
@@ -723,6 +723,34 @@ namespace Si_Alliance
             ForcedWinner = null;
             LastRoundWinners = "";
             _endReason = null; _endOutcome = null;
+            IntroArmed = false;
+        }
+
+        // ------------------------------------------------------------------ round intro
+        // Everyone gets a two-line !ally explanation intro_s of game time into a round whose start the mod saw (after
+        // Si_Market's "Trading is open" at ~20-30 s). Only in a 3-team round without an alliance (a pre-start locked 2v1
+        // has its own line) and with players on the server. Built from the live config.
+        internal static bool IntroArmed;
+        static float _introNext;
+
+        /// <summary>Called every frame by OnUpdate while IntroArmed; checks once per second, fires or drops the intro once.</summary>
+        internal static void IntroTick(float now)
+        {
+            if (now < _introNext) return;
+            _introNext = now + 1f;
+            if (Cfg.Enabled && Cfg.IntroS > 0f && GameTime < Cfg.IntroS) return;
+            IntroArmed = false;
+            int n = 0; try { n = Player.Players.Count; } catch { }
+            string skip = !Cfg.Enabled ? "alliances off" : Cfg.IntroS <= 0f ? "intro_s 0" : !GameRunning ? "no round running"
+                        : !IsHvHvA(out string why) ? why : Active ? "alliance active" : n <= 0 ? "no players" : "";
+            if (skip.Length > 0) { AllianceMod.Debug("round intro skipped: " + skip); return; }
+            string from = Cfg.MinMinutes > 0f
+                ? "From minute " + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " a commander proposes one with !ally <team>."
+                : "A commander proposes one with !ally <team>.";
+            AllianceMod.ToAll("Alliances are on: two teams can ally against the third. " + from);
+            AllianceMod.ToAll(Cfg.FpsVote == "both" ? "Then the players of both teams vote: !ally yes | !ally no (" + F(Cfg.VoteS) + " s). In each team the majority of the votes cast decides, both teams must agree."
+                            : Cfg.FpsVote == "lone" ? "Then the players of the asked team vote: !ally yes | !ally no (" + F(Cfg.VoteS) + " s). The majority of the votes cast decides."
+                            : "The asked team's commander answers with !ally accept | !ally decline.");
         }
 
         // ------------------------------------------------------------------ reminders and join notices

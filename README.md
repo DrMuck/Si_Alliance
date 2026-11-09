@@ -35,9 +35,9 @@ With `fps_vote` = `both` (default) a commander's `!ally <team>` opens a vote of 
 told "Sol proposes an alliance with Centauri against Alien. Players of Sol and Centauri: !ally yes | !ally no (45 s)".
 The proposing commander's yes is counted automatically; the asked commander votes like any player. With `lone` only
 the asked team votes and the proposing commander's word stands for his team. A voting team passes when it has more
-yes than no votes, at least one vote, and at least `ceil(min_turnout * players)` votes (players = `Team.GetNumPlayers()`
-when the vote is counted; votes of players who left the team are dropped). A team whose players have all voted is
-final; when every voting team is final, or the time is up, the vote resolves: all voting teams pass -> the alliance
+yes than no votes among the votes cast (only the players who voted count, not the team's size; a tie or no vote at all
+does not pass; votes of players who left the team are dropped). A team whose players (`Team.GetNumPlayers()`) have all
+voted is final; when every voting team is final, or the time is up, the vote resolves: all voting teams pass -> the alliance
 forms; otherwise "Alliance Sol+Centauri rejected: Sol 2 yes / 3 no (no majority), Centauri ..." and the proposing
 team waits `decline_cooldown_s`. A team with no human players passes (team A: the proposer's word; team B: only under
 `ai_policy` `always`). An asked team without a human commander: `ai_policy` `never` refuses at once, `always` lets its
@@ -45,6 +45,12 @@ players vote. `fps_vote` = `off` keeps the 0.1.x commander accept/decline.
 
 The alliance ends automatically when the lone team is eliminated (final showdown), when either ally is eliminated,
 at round end, on scene load, after `!ally break` + grace, or by `!allyadmin clear`.
+
+Announcements: every state change is broadcast; while an alliance is active everyone gets a reminder every `remind_s`
+and late joiners a private notice (`join_notice`). Since 0.3.1 everyone also gets a two-line intro `intro_s` (60) into
+each 3-team round ("Alliances are on: ... !ally <team>" plus the vote rule of the current `fps_vote`), built from the
+live config; not when alliances are off, the round already has an alliance (a locked 2v1 has its own line), the mod was
+loaded mid-round, or no player is connected.
 
 ## Mod API (`Si_Alliance.AllianceApi`, ApiVersion 1)
 
@@ -157,7 +163,6 @@ A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the 
 | `ai_policy` | `always` | Target team without a human commander: `always` accepts (`fps_vote` off) or lets its players vote (no players = passes), `never` refuses, `vote` is reserved (treated as `never`). |
 | `fps_vote` | `both` | `both`: players of both teams vote; `lone`: only the asked team votes; `off`: the asked commander answers alone (60 s). A 0.1.x config (it has `quorum`) with `off` is switched to `both` once on load. |
 | `vote_s` | 45 | Vote duration in seconds (10..180). |
-| `min_turnout` | 0.33 | Share of a team's human players that must vote for that team's vote to count (0..1; 3 players -> 1 vote, 6 -> 2). |
 | `quorum` | - | Removed in 0.2.0 (ignored in old files, dropped on the next save). |
 | `break_grace_s` | 30 | Seconds between `!ally break` and the end of the alliance. |
 | `decline_cooldown_s` | 120 | Requesting team's wait after a decline or an unanswered request. |
@@ -167,6 +172,7 @@ A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the 
 | `allied_voice` | true | Relay allied team voice (see limitations). |
 | `remind_s` | 180 | Seconds between "X + Y are allied against Z" reminders to everyone while an alliance is active (0 = off, min 30). |
 | `join_notice` | true | A player who joins (or was absent at formation) gets a private notice about the alliance ~10 s after appearing. |
+| `intro_s` | 60 | Seconds of game time after the round start at which everyone gets a two-line `!ally` / vote explanation (0 = off, max 3600). |
 | `locked_end` | `humans_win` | Locked alliance, lone team eliminated: `humans_win` = the round ends, the allies win together (stronger ally reported as winner); `dissolve` = final 1v1 like an unlocked alliance. |
 | `debug` | false | Extra log lines. |
 

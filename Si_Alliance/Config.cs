@@ -22,8 +22,7 @@ namespace Si_Alliance
         [JsonProperty("fps_vote")] public string FpsVote = "both";
         // Vote duration in seconds (10..180).
         [JsonProperty("vote_s")] public float VoteS = 45f;
-        // Share of a team's human players that must have voted for that team's vote to count (0..1).
-        [JsonProperty("min_turnout")] public float MinTurnout = 0.33f;
+        // 0.2.x/0.3.0 key "min_turnout" is gone since 0.3.1: majority of the votes cast (ignored in old files, dropped on the next save).
         // 0.1.x key "quorum" is gone (ignored when an old file is loaded, dropped on the next save).
         // Seconds between "!ally break" and the end of the alliance.
         [JsonProperty("break_grace_s")] public float BreakGraceS = 30f;
@@ -40,6 +39,8 @@ namespace Si_Alliance
         [JsonProperty("remind_s")] public float RemindS = 180f;
         /// <summary>Players who join (or were absent at formation) get a private notice ~10 s after they appear.</summary>
         [JsonProperty("join_notice")] public bool JoinNotice = true;
+        /// <summary>Seconds of game time after the round start at which everyone gets a short !ally / vote explanation (HvHvA only, 0 = off).</summary>
+        [JsonProperty("intro_s")] public float IntroS = 60f;
         /// <summary>
         /// Locked alliance (AllianceApi.ForceAlliance(.., locked: true), e.g. Si_VersusVote's 2v1) when the lone team is
         /// eliminated: "humans_win" = the round ends at once, the allies win together (the ally with more structures is
@@ -106,8 +107,6 @@ namespace Si_Alliance
             if (FpsVote != "off" && FpsVote != "both" && FpsVote != "lone") FpsVote = "both";
             if (float.IsNaN(VoteS) || VoteS < 10f) VoteS = 10f;
             if (VoteS > 180f) VoteS = 180f;
-            if (float.IsNaN(MinTurnout) || MinTurnout < 0f) MinTurnout = 0f;
-            if (MinTurnout > 1f) MinTurnout = 1f;
             if (float.IsNaN(BreakGraceS) || BreakGraceS < 0f) BreakGraceS = 0f;
             if (BreakGraceS > 600f) BreakGraceS = 600f;
             if (float.IsNaN(DeclineCooldownS) || DeclineCooldownS < 0f) DeclineCooldownS = 0f;
@@ -115,6 +114,8 @@ namespace Si_Alliance
             if (float.IsNaN(RemindS) || RemindS < 0f) RemindS = 0f;
             if (RemindS > 0f && RemindS < 30f) RemindS = 30f;
             if (RemindS > 3600f) RemindS = 3600f;
+            if (float.IsNaN(IntroS) || IntroS < 0f) IntroS = 0f;
+            if (IntroS > 3600f) IntroS = 3600f;
             LoneIncomeMult = ClampMult(LoneIncomeMult);
             LockedEnd = (LockedEnd ?? "humans_win").Trim().ToLowerInvariant();
             if (LockedEnd != "humans_win" && LockedEnd != "dissolve") LockedEnd = "humans_win";

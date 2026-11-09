@@ -48,7 +48,7 @@ namespace Si_Alliance
                 {
                     string a = Alliance.NameOf(Alliance.ReqFrom), b = Alliance.NameOf(Alliance.ReqTo);
                     string voters = Alliance.VoteA ? "Players of " + a + " and " + b : "Players of " + b;
-                    string how = " Majority of votes cast; at least " + (Cfg.MinTurnout * 100f).ToString("0", CultureInfo.InvariantCulture) + " % of a team must vote. Voting again changes your vote.";
+                    string how = " Majority of votes cast. Voting again changes your vote.";
                     x.Action("!ally yes", Alliance.VoteA ? "Vote YES: ally " + a + " + " + b : "Vote YES: ally with " + a,
                              voters + ": vote for the alliance of " + a + " and " + b + " against the third team." + how);
                     x.Action("!ally no", "Vote NO", voters + ": vote against the alliance of " + a + " and " + b + "." + how);

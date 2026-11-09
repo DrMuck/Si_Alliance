@@ -28,7 +28,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -90,8 +90,13 @@ namespace Si_Alliance
         public override void OnUpdate()
         {
             if (!_registered) return;
-            if (Alliance.State == AllyState.None) return;
             float now = Time.time;
+            if (Alliance.IntroArmed)
+            {
+                try { Alliance.IntroTick(now); }
+                catch (Exception ex) { Alliance.IntroArmed = false; MelonLogger.Error("[ALLY] intro: " + ex); }
+            }
+            if (Alliance.State == AllyState.None) return;
             if (!CheckSoon && now < _nextTick) return;
             _nextTick = now + 1f;
             CheckSoon = false;
