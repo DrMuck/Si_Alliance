@@ -18,12 +18,12 @@ Requires the [Admin Mod](https://github.com/data-bomb/Silica) (commands, chat, d
 
 | Command | Who | Effect |
 |---|---|---|
-| `!ally <team>` | commander | Propose an alliance to that team (name prefix: `sol`, `cent`, `alien`). With `fps_vote` `both`/`lone` this opens a player vote (see Vote); with `off` the other commander has 60 s to answer. A team without a human commander (RTS AI) is handled by `ai_policy`. |
+| `!ally <team>` | commander | Propose an alliance to that team (name prefix: `sol`, `cent`, `alien`); works from the round start (no minimum game time since 0.3.2). With `fps_vote` `both`/`lone` this opens a player vote (see Vote); with `off` the other commander has 60 s to answer. A team without a human commander (RTS AI) is handled by `ai_policy`. |
 | `!ally yes` / `!ally no` | players of a voting team | Vote on the open alliance (`accept` = yes; `decline`, `deny`, `reject` = no; `!ally respond accept\|decline` likewise). Voting again overwrites your vote. |
 | `!ally accept` / `!ally decline` | commander of the asked team (`fps_vote` `off`) | Answer the open request (`!ally respond accept\|decline` does the same, used by the ModUI picker). A decline blocks the requesting team for `decline_cooldown_s`. While a vote runs these are votes. |
 | `!ally break` | commander of an ally | Announced to everyone; the alliance ends after `break_grace_s`. Once per team per round. A locked alliance answers "This alliance is locked (2v1)". |
 | `!ally status` | anyone | Current alliance, open request or running vote with its tallies. |
-| `!allyadmin force <teamA> <teamB> [lock]` (or `<teamA>+<teamB>`) | admin (Teams) | Ally two teams now, no vote; ignores `min_minutes` and `one_alliance_per_round` (still HvHvA only). Works from the layout choice on (countdown included). `lock` makes it a locked alliance. Refused while a locked alliance stands. |
+| `!allyadmin force <teamA> <teamB> [lock]` (or `<teamA>+<teamB>`) | admin (Teams) | Ally two teams now, no vote; ignores `one_alliance_per_round` (still HvHvA only). Works from the layout choice on (countdown included). `lock` makes it a locked alliance. Refused while a locked alliance stands. |
 | `!allyadmin clear [--force]` | admin | End the alliance, or remove the open request / cancel the running vote (announced). A locked alliance needs `--force` (also `force`, `-f`); the round then goes on as a normal 3-way. |
 | `!allyadmin mult <x>` | admin | Set `lone_income_mult` (1..5, saved). |
 | `!allyadmin status` | admin | Teams with FriendlyIndex, player count, commander, lost flag, dropped hit counters. |
@@ -48,8 +48,8 @@ at round end, on scene load, after `!ally break` + grace, or by `!allyadmin clea
 
 Announcements: every state change is broadcast; while an alliance is active everyone gets a reminder every `remind_s`
 and late joiners a private notice (`join_notice`). Since 0.3.1 everyone also gets a two-line intro `intro_s` (60) into
-each 3-team round ("Alliances are on: ... !ally <team>" plus the vote rule of the current `fps_vote`), built from the
-live config; not when alliances are off, the round already has an alliance (a locked 2v1 has its own line), the mod was
+each 3-team round ("Alliances are on: two teams can ally against the third. A commander proposes one with !ally <team>."
+plus the vote rule of the current `fps_vote`), built from the live config; not when alliances are off, the round already has an alliance (a locked 2v1 has its own line), the mod was
 loaded mid-round, or no player is connected.
 
 ## Mod API (`Si_Alliance.AllianceApi`, ApiVersion 1)
@@ -70,7 +70,7 @@ public static class AllianceApi {
 ```
 
 - `ForceAlliance` = `!allyadmin force A B` without the chat: forms the alliance at once, bypassing `enabled`,
-  `min_minutes`, `one_alliance_per_round` and the vote / accept flow; an open request or vote is cancelled. Team names:
+  `one_alliance_per_round` and the vote / accept flow; an open request or vote is cancelled. Team names:
   `TeamShortName` or `TeamName`, case-insensitive, an unambiguous prefix also works (`Sol`, `Centauri`, `Alien`). Works
   from `MP_Strategy.SetTeamVersusMode(HUMANS_VS_HUMANS_VS_ALIENS)` on, i.e. during MissionState INIT with no players,
   units or commanders (it only needs the active team setups of the layout and `Team.FriendlyIndex`). An alliance formed
@@ -159,7 +159,6 @@ A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | true | Master switch for player requests (admin commands still work). |
-| `min_minutes` | 5 | No request before this much game time. |
 | `ai_policy` | `always` | Target team without a human commander: `always` accepts (`fps_vote` off) or lets its players vote (no players = passes), `never` refuses, `vote` is reserved (treated as `never`). |
 | `fps_vote` | `both` | `both`: players of both teams vote; `lone`: only the asked team votes; `off`: the asked commander answers alone (60 s). A 0.1.x config (it has `quorum`) with `off` is switched to `both` once on load. |
 | `vote_s` | 45 | Vote duration in seconds (10..180). |

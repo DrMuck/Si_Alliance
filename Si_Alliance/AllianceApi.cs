@@ -13,7 +13,7 @@ namespace Si_Alliance
 
         /// <summary>
         /// Forms the alliance teamA + teamB against the third team at once (same effect as "!allyadmin force A B"), bypassing
-        /// min_minutes, one_alliance_per_round, enabled and the vote / accept flow. Usable from MissionState INIT right after
+        /// one_alliance_per_round, enabled and the vote / accept flow. Usable from MissionState INIT right after
         /// MP_Strategy.SetTeamVersusMode(HUMANS_VS_HUMANS_VS_ALIENS) on: teams are looked up among the active team setups of
         /// that layout, no players, units or commanders are needed. An alliance formed before the start survives the round
         /// start (OnGameStarted) and is announced again then.

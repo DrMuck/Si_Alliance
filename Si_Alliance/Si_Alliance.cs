@@ -28,7 +28,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.3.1";
+        public const string Version = "0.3.2";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;

@@ -744,10 +744,7 @@ namespace Si_Alliance
             string skip = !Cfg.Enabled ? "alliances off" : Cfg.IntroS <= 0f ? "intro_s 0" : !GameRunning ? "no round running"
                         : !IsHvHvA(out string why) ? why : Active ? "alliance active" : n <= 0 ? "no players" : "";
             if (skip.Length > 0) { AllianceMod.Debug("round intro skipped: " + skip); return; }
-            string from = Cfg.MinMinutes > 0f
-                ? "From minute " + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " a commander proposes one with !ally <team>."
-                : "A commander proposes one with !ally <team>.";
-            AllianceMod.ToAll("Alliances are on: two teams can ally against the third. " + from);
+            AllianceMod.ToAll("Alliances are on: two teams can ally against the third. A commander proposes one with !ally <team>.");
             AllianceMod.ToAll(Cfg.FpsVote == "both" ? "Then the players of both teams vote: !ally yes | !ally no (" + F(Cfg.VoteS) + " s). In each team the majority of the votes cast decides, both teams must agree."
                             : Cfg.FpsVote == "lone" ? "Then the players of the asked team vote: !ally yes | !ally no (" + F(Cfg.VoteS) + " s). The majority of the votes cast decides."
                             : "The asked team's commander answers with !ally accept | !ally decline.");

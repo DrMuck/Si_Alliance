@@ -11,7 +11,7 @@ namespace Si_Alliance
     // The panel shows the state in words (what is going on, who can act now, when it opens), the three teams with
     // players and commander, and only the player entries that make sense in the current state (answer while a request
     // is open, vote yes/no while an FPS vote runs, break while allied, propose otherwise). The admin "ally" entry is a choice of the three team pairs.
-    // Countdowns are rounded to 10 s and the round time to the minute so the server pushes few frames.
+    // Countdowns are rounded to 10 s so the server pushes few frames.
     public partial class AllianceMod
     {
         static string? _cache; static string _cacheKey = "";
@@ -28,8 +28,7 @@ namespace Si_Alliance
                 string who = Cfg.FpsVote == "both" ? "commanders propose, players of both teams vote (majority of votes cast, " + F0(Cfg.VoteS) + " s)"
                            : Cfg.FpsVote == "lone" ? "commanders propose, players of the asked team vote (majority of votes cast, " + F0(Cfg.VoteS) + " s)"
                            : "commanders propose and answer";
-                string rules = "Rules: " + who + " (" + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " min after the start" +
-                               (Cfg.OneAlliancePerRound ? ", one alliance per round" : "") + "). Allies cannot damage each other; AI and turrets hold fire. " +
+                string rules = "Rules: " + who + (Cfg.OneAlliancePerRound ? " (one alliance per round)" : "") + ". Allies cannot damage each other; AI and turrets hold fire. " +
                                (Alliance.Active && Alliance.Locked
                                    ? (Cfg.LockedEnd == "humans_win" ? "This round's alliance is locked (2v1): when the third team is eliminated the allies win together"
                                                                     : "This round's alliance is locked (2v1): no break; when the third team is eliminated, final 1v1")
@@ -69,7 +68,7 @@ namespace Si_Alliance
 
                 // ---- admins ----
                 if (pairs.Count > 0)
-                    x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once, no commander vote; ignores the opening time and the one-per-round rule.", true, "choice", pairs.ToArray());
+                    x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once, no commander vote; ignores the one-per-round rule.", true, "choice", pairs.ToArray());
                 else
                     x.Picker("!allyadmin force", "Ally two teams (admin)", "Forms the alliance at once (pick both teams); needs a running 3-team round.", true, "team,team");
                 if (Alliance.Active && Alliance.Locked)
@@ -106,8 +105,6 @@ namespace Si_Alliance
             }
             if (!Alliance.IsHvHvA(out string why)) return "No alliance: " + why + ".";
             if (Cfg.OneAlliancePerRound && Alliance.FormedThisRound) return "No alliance. This round's alliance has ended (one per round).";
-            float open = Cfg.MinMinutes * 60f, t = Alliance.GameTime;
-            if (t < open) return "No alliance yet. Commanders can propose one from minute " + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " (round time " + ((int)(t / 60f)) + " min).";
             return "No alliance. Commanders can propose one now.";
         }
 

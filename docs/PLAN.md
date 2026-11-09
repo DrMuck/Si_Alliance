@@ -67,7 +67,7 @@ team X to Y" from the server document) would fix every cosmetic row above. Not r
    FriendlyIndex restored, 1v1 to the normal vanilla end (real winner, End screen works). Also ends when either
    ally is eliminated, at round end, or by `!ally break` (announced, takes effect after a config grace of 30 s so
    nobody gets backstabbed mid-fight; one break per team per round).
-5. Restrictions: no new alliance within the first N minutes (config `min_minutes = 5`), at most one alliance per
+5. Restrictions: no new alliance within the first N minutes (config `min_minutes = 5`; removed in 0.3.2), at most one alliance per
    round (config), admin `!ally force <A> <B>` / `!ally clear` for testing.
 
 ## 4. Mechanics (server mod)
@@ -120,7 +120,7 @@ team X to Y" from the server document) would fix every cosmetic row above. Not r
 - ModUI (`ModUI_Export.cs` copy): Info line with status, Picker `team` for the request (commander-gated inside the
   handler), choice picker accept/decline, admin force/clear. Pending request shown as shared Info line (player data
   refreshes only once a minute).
-- Config `UserData/cfg/Alliance/Si_Alliance_Config.json`: enabled, min_minutes, ai_policy, fps_vote, vote_s,
+- Config `UserData/cfg/Alliance/Si_Alliance_Config.json`: enabled, min_minutes (removed in 0.3.2), ai_policy, fps_vote, vote_s,
   min_turnout (0.2.0; quorum removed; min_turnout removed in 0.3.1), intro_s (0.3.1), break_grace_s, decline_cooldown_s, lone_income_mult, bloc_balance, debug.
 
 ## 7. Project setup
@@ -163,6 +163,8 @@ TargetFinder (same GetTeamsAreEnemy call).
   of game time after a round start the mod saw, everyone gets two lines explaining `!ally <team>` and the vote rule of
   the current fps_vote (HvHvA only, not with an alliance already active, not with no player connected); Si_Market's
   "Trading is open" comes at ~20-30 s, so the two do not collide.
+- 0.3.2 (2026-11-09): no minimum game time before a request: `!ally <team>` works from the round start (`min_minutes`
+  removed; ignored in old files, dropped on the next save). The intro's first line no longer names a minute.
 - Player cap: bloc balance (allied pair counts as one bloc) via a hook in Si_EloMatchmaking.
 - Income multiplier: config `lone_income_mult`, default 1.0 (off); flat, not scaled by imbalance in v1.
 - RTS_AI (no human commander) team: config `ai_policy`, default "always" (AI accepts any request; AI never requests).

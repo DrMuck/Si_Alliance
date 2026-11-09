@@ -12,8 +12,7 @@ namespace Si_Alliance
     public class AllianceConfig
     {
         [JsonProperty("enabled")] public bool Enabled = true;
-        // No player request before this many minutes of game time (admin force ignores it).
-        [JsonProperty("min_minutes")] public float MinMinutes = 5f;
+        // 0.1.x-0.3.1 key "min_minutes" is gone since 0.3.2: requests from the round start (ignored in old files, dropped on the next save).
         // Target team without a human commander (RTS AI): "always" = accepts (fps_vote off) or lets its players vote
         // (fps_vote on; no players = passes), "never" = refuses, "vote" = reserved (treated as "never").
         [JsonProperty("ai_policy")] public string AiPolicy = "always";
@@ -99,8 +98,6 @@ namespace Si_Alliance
 
         public void Sanitize()
         {
-            if (float.IsNaN(MinMinutes) || MinMinutes < 0f) MinMinutes = 0f;
-            if (MinMinutes > 120f) MinMinutes = 120f;
             AiPolicy = (AiPolicy ?? "always").Trim().ToLowerInvariant();
             if (AiPolicy != "always" && AiPolicy != "never" && AiPolicy != "vote") AiPolicy = "always";
             FpsVote = (FpsVote ?? "both").Trim().ToLowerInvariant();

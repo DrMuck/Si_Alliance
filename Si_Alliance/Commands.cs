@@ -91,12 +91,6 @@ namespace Si_Alliance
             if (Alliance.Active) { Reply(caller, "there is already an alliance: " + Alliance.StatusText(Time.time)); return; }
             if (Alliance.State == AllyState.Pending) { Reply(caller, "a request is already open: " + Alliance.StatusText(Time.time)); return; }
             if (Cfg.OneAlliancePerRound && Alliance.FormedThisRound) { Reply(caller, "only one alliance per round"); return; }
-            float minS = Cfg.MinMinutes * 60f;
-            if (Alliance.GameTime < minS)
-            {
-                Reply(caller, "alliances open after " + Cfg.MinMinutes.ToString("0.#", CultureInfo.InvariantCulture) + " minutes (in " + Alliance.F(minS - Alliance.GameTime) + " s)");
-                return;
-            }
             float cd = Alliance.CooldownLeft(own, Time.time);
             if (cd > 0f) { Reply(caller, "your last request was declined, wait " + Alliance.F(cd) + " s"); return; }
 
