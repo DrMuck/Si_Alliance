@@ -133,13 +133,55 @@ players are rated as losers against the first ally. Elo needs a change to read `
   at all.**
 - Lone team income: every harvest deposit of the lone team pays `delta * (lone_income_mult - 1)` extra
   (`Team.StoreResource`, overflow to `StartingResources`). Off at the default 1.0.
+- Ally reveal sweep (`reveal_allies`, since 0.3.3): ally objects spawned while the alliance stands are re-sent to the
+  clients as detected, see below.
+
+## Ally reveal sweep (0.3.3)
+
+**Bug (0.3.2 and older):** in a 2v1 round (Sol + Centauri allied from MissionState INIT) the allied commanders could
+not see each other's units and structures: no map icons, hidden in the RTS view, and building placement was blocked by
+"invisible" objects. The same happened to everything spawned after a mid-round alliance formed. Cause (vanilla,
+server-side only): `Game.SpawnPrefab` sets `BaseGameObject.Team` before `SetNetSource` / `SendNetSpawn`; the Team setter
+calls `Target.RevealToFriendlyTeams` -> `allyTeam.DetectTarget` -> `RPC_TargetDetected`, which reaches the clients
+**before** the object's ObjectCreate packet, and the client drops it silently (unknown NetID). `Team.TickTeams` pins
+friendly detections on the server (never lost), so the RPC is never sent again, and clients do not know
+`FriendlyIndex`, so they never reveal the ally themselves. Objects that existed before a mid-round alliance formed were
+usually fine (vanilla's reveal on the FriendlyIndex change reaches already spawned objects).
+
+**Fix:** while an alliance is active (any alliance: locked 2v1 from INIT, forced, or voted; the sweep also runs during
+the countdown, where the HQs spawn on the first team join) the server checks every `reveal_interval_s` (0.5 s) both
+directions: every object of team B in team A's detected list (and the reverse) that has a valid NetID is re-sent once to
+all clients with the vanilla RPC (Team A `TARGET_DETECTED` + NetID). It is sent at the earliest one sweep after the
+sweep that first saw it; every spawn path sends the ObjectCreate packet in the same call that set the team, so the RPC
+can no longer arrive before the object. No `Team.DetectTarget` call (no game events, no AI side effects); a duplicate
+RPC is harmless on the client. Tracking is per (team, object) with the NetID (a reused NetID or a NetID change re-sends),
+objects that disappear are pruned, and everything is cleared when the alliance ends, on `MP_Strategy.Restart` and on
+scene load. At most 100 RPCs per sweep (a mid-round alliance re-sends the already visible objects once, spread over a
+few sweeps). A player whose level finished loading (`GameEvents.OnPlayerJoined`: new joiners and re-loads after a map
+change) gets every ally object already sent, to him only, 5 s later (covers Si_PacketChunker's TeamInit trimming on
+0.9.47; on 1.0.x the join snapshot already contains them). After the alliance ends nothing is undone: the objects stay
+in the clients' lists like in the server's own lists, and vanilla's normal detection timeout removes them on the server
+and the clients.
+
+Cost: two passes over the allies' detected lists every 0.5 s, no allocations, no LINQ; RPCs only for new ally objects.
+
+Log: `[ALLY] reveal: re-sending ally objects to clients for Sol + Centauri (N in the first sweep, every 0.5 s)` once
+per alliance, then at most every 60 s `[ALLY] reveal: re-sent N ally objects to clients (total M, tracked K)`, per join
+`[ALLY] reveal: join re-send to <name>: N ally objects`, and at the end `[ALLY] reveal: stopped (<reason>), re-sent M
+ally objects in total, J join re-sends`. `!allyadmin status` ends with `reveal_allies True (every 0.5 s, re-sent M,
+tracked K, join re-sends J)`.
+
+**Limits on unmodded clients:** the client still thinks the ally is an enemy (FriendlyIndex is not networked), so
+revealed ally objects show as detected **enemies**: red icons and outlines. Untested: an "enemy spotted" alarm or
+combat music may play because of ally units. `reveal_allies false` restores the 0.3.2 behaviour.
 
 ## Known limitations (server-only, unmodded clients)
 
 Clients keep their own FriendlyIndex (it is not networked), so on every client:
 
 - allied units and structures are still drawn as enemies (red crosshair, health bars, map icons, outlines), "enemy
-  spotted" voice lines and combat music play;
+  spotted" voice lines and combat music play; since 0.3.3 the ally reveal sweep makes ally objects spawned during the
+  alliance visible at all (before they could stay invisible to the other ally), as enemies;
 - players can still shoot allies and see hit effects; the server drops the damage, health never goes down;
 - a commander's right-click on an ally still issues an attack order (forced target); damage is dropped anyway;
 - the ally's explored fog terrain is not shared (spotted units are, via detection RPCs);
@@ -173,6 +215,8 @@ A later Si_ModUI client hook ("set FriendlyIndex of team X to Y") would fix the 
 | `join_notice` | true | A player who joins (or was absent at formation) gets a private notice about the alliance ~10 s after appearing. |
 | `intro_s` | 60 | Seconds of game time after the round start at which everyone gets a two-line `!ally` / vote explanation (0 = off, max 3600). |
 | `locked_end` | `humans_win` | Locked alliance, lone team eliminated: `humans_win` = the round ends, the allies win together (stronger ally reported as winner); `dissolve` = final 1v1 like an unlocked alliance. |
+| `reveal_allies` | true | Ally reveal sweep (0.3.3): re-send ally objects spawned during the alliance to the clients as detected (fixes invisible allied units/structures and blocked placement in 2v1). false = 0.3.2 behaviour. |
+| `reveal_interval_s` | 0.5 | Seconds between two reveal sweeps (0.1..5). |
 | `debug` | false | Extra log lines. |
 
 ## Logging

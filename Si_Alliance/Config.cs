@@ -46,6 +46,14 @@ namespace Si_Alliance
         /// the reported winner), "dissolve" = like an unlocked alliance, final 1v1 between the former allies.
         /// </summary>
         [JsonProperty("locked_end")] public string LockedEnd = "humans_win";
+        /// <summary>
+        /// Ally reveal sweep (0.3.3): while an alliance is active, ally units/structures spawned after its formation are
+        /// re-sent to the clients as detected (vanilla's own reveal reaches them before the object exists and is dropped,
+        /// so allied commanders saw no icons and hit "invisible" objects when placing). false = 0.3.2 behaviour.
+        /// </summary>
+        [JsonProperty("reveal_allies")] public bool RevealAllies = true;
+        /// <summary>Seconds between two reveal sweeps (0.1..5).</summary>
+        [JsonProperty("reveal_interval_s")] public float RevealIntervalS = 0.5f;
         [JsonProperty("debug")] public bool Debug = false;
 
         public static string Dir => System.IO.Path.Combine(MelonEnvironment.UserDataDirectory, "cfg", "Alliance");
@@ -116,6 +124,9 @@ namespace Si_Alliance
             LoneIncomeMult = ClampMult(LoneIncomeMult);
             LockedEnd = (LockedEnd ?? "humans_win").Trim().ToLowerInvariant();
             if (LockedEnd != "humans_win" && LockedEnd != "dissolve") LockedEnd = "humans_win";
+            if (float.IsNaN(RevealIntervalS) || float.IsInfinity(RevealIntervalS)) RevealIntervalS = 0.5f;
+            if (RevealIntervalS < 0.1f) RevealIntervalS = 0.1f;
+            if (RevealIntervalS > 5f) RevealIntervalS = 5f;
         }
 
         public static float ClampMult(float m)

@@ -472,6 +472,7 @@ namespace Si_Alliance
             ClearPending();   // State is Active already: only drops the request / vote tallies
             BreakAt = 0f; BreakBy = null;
             DroppedHits = 0; DroppedServerHits = 0;
+            Reveal.Reset(null);   // the reveal sweep starts fresh with the next OnUpdate (also at MissionState INIT)
 
             _formGameTime = GameTime;
             _formedBy = formedBy;
@@ -555,6 +556,7 @@ namespace Si_Alliance
             BreakAt = 0f; BreakBy = null;
             Forced = false; Locked = false; FormedPreStart = false;
             ClearNotices();
+            Reveal.Reset(reason);   // stop sweeping; clients keep what they were sent, like the server's own lists
 
             Restore(a); Restore(b); Restore(lone);
             Balance.OnDissolve();
@@ -719,6 +721,7 @@ namespace Si_Alliance
         internal static void OnRestart()
         {
             Dissolve("restart", "-", announce: false);
+            Reveal.Reset(null);
             ResetRound();
             ForcedWinner = null;
             LastRoundWinners = "";

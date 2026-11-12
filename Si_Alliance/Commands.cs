@@ -264,6 +264,7 @@ namespace Si_Alliance
                     }
                     sb.Append(" | game ").Append(Alliance.F(Alliance.GameTime)).Append(" s, dropped hits ").Append(Alliance.DroppedHits).Append('/').Append(Alliance.DroppedServerHits);
                     if (Alliance.Active) sb.Append(" | ").Append(Alliance.Describe()).Append(Alliance.Forced ? ", forced" : "").Append(Alliance.Locked ? ", locked_end " + Cfg.LockedEnd : "");
+                    sb.Append(" | ").Append(Reveal.StatusText());
                     Reply(caller, sb.ToString());
                     return;
                 }

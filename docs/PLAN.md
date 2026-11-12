@@ -165,6 +165,12 @@ TargetFinder (same GetTeamsAreEnemy call).
   "Trading is open" comes at ~20-30 s, so the two do not collide.
 - 0.3.2 (2026-11-09): no minimum game time before a request: `!ally <team>` works from the round start (`min_minutes`
   removed; ignored in old files, dropped on the next save). The intro's first line no longer names a minute.
+- 0.3.3 (2026-11-11): ally reveal sweep (`reveal_allies` true, `reveal_interval_s` 0.5; Reveal.cs). Bug: in a 2v1 round
+  allied commanders could not see each other's objects (no icons, hidden in the RTS view, placement blocked) because
+  vanilla's TARGET_DETECTED for a freshly spawned ally object is sent before its ObjectCreate packet (Game.SpawnPrefab
+  sets Team before SendNetSpawn) and dropped by the client; friendly detections never expire, so it is never re-sent.
+  The sweep re-sends the vanilla RPC once per ally object, one sweep after first seeing it, while any alliance is active
+  (also at INIT); late joiners get the list 5 s after GameEvents.OnPlayerJoined. Details: README "Ally reveal sweep".
 - Player cap: bloc balance (allied pair counts as one bloc) via a hook in Si_EloMatchmaking.
 - Income multiplier: config `lone_income_mult`, default 1.0 (off); flat, not scaled by imbalance in v1.
 - RTS_AI (no human commander) team: config `ai_policy`, default "always" (AI accepts any request; AI never requests).

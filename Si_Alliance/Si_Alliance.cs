@@ -11,6 +11,8 @@
    !allyadmin force <A> <B> [lock] | clear [--force] | mult <x> | status | reload      (Power.Teams)
 
  Mods: AllianceApi (ForceAlliance / ClearForced / IsActive / IsLocked / Describe), e.g. Si_VersusVote's locked 2v1 round.
+ Ally reveal sweep (0.3.3, Reveal.cs): re-sends TARGET_DETECTED for ally objects spawned during the alliance (vanilla's own
+ reveal reaches clients before the object's spawn packet and is dropped).
 
  Design and decisions: docs/PLAN.md. Requires the Admin Mod (commands, chat, damage event).
 */
@@ -28,7 +30,7 @@ namespace Si_Alliance
 {
     public partial class AllianceMod : MelonMod
     {
-        public const string Version = "0.3.2";
+        public const string Version = "0.3.3";
         internal const string Tag = "<color=#F5C542>[ALLY]</color> ";
         internal static AllianceConfig Cfg = new AllianceConfig();
         internal static bool _registered;
@@ -54,7 +56,7 @@ namespace Si_Alliance
                 RoundPatches.Apply(HarmonyInstance);
                 _registered = true;
                 MelonLogger.Msg("[ALLY] Si_Alliance v" + Version + " loaded (enabled " + Cfg.Enabled + ", ai_policy " + Cfg.AiPolicy + ", fps_vote " + Cfg.FpsVote +
-                                ", lone_income_mult " + Cfg.LoneIncomeMult.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ", locked_end " + Cfg.LockedEnd + "), !ally / !allyadmin registered, AllianceApi v" + AllianceApi.ApiVersion);
+                                ", lone_income_mult " + Cfg.LoneIncomeMult.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ", locked_end " + Cfg.LockedEnd + ", reveal_allies " + Cfg.RevealAllies + "), !ally / !allyadmin registered, AllianceApi v" + AllianceApi.ApiVersion);
             }
             catch (Exception ex) { MelonLogger.Error("[ALLY] init failed: " + ex); }
         }
@@ -67,6 +69,7 @@ namespace Si_Alliance
             GameEvents.OnGameStarted -= OnGameStarted; GameEvents.OnGameStarted += OnGameStarted;
             GameEvents.OnGameEnded -= OnGameEnded; GameEvents.OnGameEnded += OnGameEnded;
             GameEvents.OnResourcesHarvested -= Balance.OnResourcesHarvested; GameEvents.OnResourcesHarvested += Balance.OnResourcesHarvested;
+            GameEvents.OnPlayerJoined -= Reveal.OnPlayerJoined; GameEvents.OnPlayerJoined += Reveal.OnPlayerJoined;
         }
 
         static void OnGameStarted(GameMode mode)
@@ -95,6 +98,12 @@ namespace Si_Alliance
             {
                 try { Alliance.IntroTick(now); }
                 catch (Exception ex) { Alliance.IntroArmed = false; MelonLogger.Error("[ALLY] intro: " + ex); }
+            }
+            // ally reveal sweep (0.3.3): its own interval, also during MissionState INIT (pre-start 2v1: HQs spawn on the first team join)
+            if (Alliance.Active && Cfg.RevealAllies)
+            {
+                try { Reveal.Tick(now); }
+                catch (Exception ex) { Reveal.Fail(ex); }
             }
             if (Alliance.State == AllyState.None) return;
             if (!CheckSoon && now < _nextTick) return;
